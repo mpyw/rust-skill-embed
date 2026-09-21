@@ -34,8 +34,10 @@ impl Installer {
 
     /// The help for one subcommand, or for the command itself when `sub` is
     /// [`None`].
-    #[must_use]
-    pub fn usage_for(&self, sub: Option<&str>) -> String {
+    ///
+    /// [`Installer::usage`] is the whole command's, which is the one a tool
+    /// prints. A subcommand's is only ever asked for by `--help`.
+    pub(crate) fn usage_for(&self, sub: Option<&str>) -> String {
         let (summary, lines) = self.headings(sub);
         let default_agents: Vec<String> =
             self.default_agents().iter().map(ToString::to_string).collect();

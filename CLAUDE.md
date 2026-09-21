@@ -362,6 +362,7 @@ behaviour looked accidental rather than chosen.
 | A skill at the root of the tree with no `name` field | Go names it after whatever string the caller passed as the root, which `include_dir!` cannot supply. It is an error that says so |
 | `safe_join` refuses `a/../b` | Go's `path.Clean` accepts it as `b`. Only a caller writing its own file list can produce one, and a `..` inside an embedded path is never meant |
 | The installed skill directory is 0755 | Go's `os.MkdirTemp` makes it 0700, which its own notes list as an accepted wart. A project checkout that another account cannot read is worse than the wart |
+| A write failure while printing help or usage replaces the reason | Go writes the help and ignores what the writer said, so `run` still answers `ErrHelp`. Here the write error wins. A front end that maps `Error::Help` to a successful exit sees a failure instead, which is the right answer when its own output did not land |
 
 ### Visibility
 
@@ -488,6 +489,7 @@ disk. That one is not on the list below: `projectroot::within` refuses it.
 | `InstallOptions::names` is not deduplicated | Naming a skill twice writes it twice |
 | A BOM moves into the body | Only when `with` creates a frontmatter block that was not there |
 | `quote` and `unquote` are asymmetric | A tool name holding a quote or a backslash never reads back, so the skill stays `foreign` |
+| A file inside an installed skill whose name is not UTF-8 | `Tree::read_dir` refuses it, so the copy reads as `foreign` where Go hashes the bytes and reads `modified`. Neither tool writes such a name, so it takes a user putting one there, and both then ask for `--force` |
 
 ## What the port changed
 
