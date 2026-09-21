@@ -129,6 +129,16 @@ impl SkillSet {
     }
 
     fn from_tree_files(files: Vec<tree::File>) -> Result<Self> {
+        // Two files at one path is a caller's mistake. Caught here, where the
+        // message can name the path: the write stages into a fresh directory
+        // and creates each file new, so the second one would otherwise fail
+        // half way through a run with nothing but "file exists".
+        let mut paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort_unstable();
+        if let Some([path, _]) = paths.windows(2).find(|w| w[0] == w[1]) {
+            return Err(Error::Skills(format!("{path} was given twice")));
+        }
+
         let junk: Vec<String> =
             files.iter().filter(|f| tree::is_junk(&f.path)).map(|f| f.path.clone()).collect();
         let whole = Tree::from_files(files);

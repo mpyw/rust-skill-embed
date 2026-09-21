@@ -185,3 +185,12 @@ fn the_report_goes_to_the_installers_own_writer() {
     let text = String::from_utf8(out.0.lock().expect("the buffer").clone()).expect("UTF-8");
     assert!(text.starts_with("installed  demo-skill"), "{text}");
 }
+
+/// The same empty value that the core front end refuses. It reached the
+/// installer as "use the default" here, which is the bug in the other one.
+#[test]
+fn an_empty_agent_is_refused_here_too() {
+    let skills = skills();
+    let options = skill_embed_clap::options(&sub(&skills, &["skill", "install", "--agent", ""]));
+    assert!(matches!(options, Err(Error::NoAgentSelected)), "{options:?}");
+}

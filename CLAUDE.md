@@ -350,6 +350,32 @@ holds the interleaving names. The rest are unit tests in `manifest.rs`.
 | `--agent ""` | Parsed to nothing, and an empty list reads as "use the default" everywhere below, so the run silently installed for every agent. Only the front end knows the flag was given |
 | `--dir ""` | Resolved to the working directory, so every skill landed loose in whatever directory the tool was run from |
 
+### A second round, against the fixes
+
+The same reviewer read the port again, against the list above. Sixteen of the
+twenty fixes were correct and complete. Four were not, and two of those were
+regressions the first round's own fixes had introduced.
+
+| | |
+| --- | --- |
+| `--agent ""` was fixed in the core front end alone | The clap adapter still dropped it to an empty list, which reads as "use the default". The same bug, in the second front end. A fix applied to one of two call sites is the shape to look for |
+| `create_new(true)` turned a duplicate path into a write failure | The umask fix made each file new, so a second file at one path failed half way through a run with nothing but "file exists". `SkillSet` rejects it now, where the message can name the path |
+| `entry.file_type()?` ended the run | The symlink fix propagated every error, where Go reads the type off the directory entry and cannot fail at all. An entry the sweep cannot type is one it cannot claim, so it is passed over |
+| A lossy command argument named a different directory | `args_os` stopped the panic, and then `to_string_lossy` sent `--dir` somewhere else and let two names collide on one replacement character. The command refuses what it cannot read, and the library still takes any `PathBuf` |
+
+**Carrying a manifest's values as bytes.** The reviewer was right that a `name`
+whose bytes are not text is dropped here and used by Go, so the two install to
+different directories. It was fixed that way for an hour: `fields` returned
+`BTreeMap<String, Vec<u8>>`, and `install.rs` and `skill.rs` grew a lossy
+decoder and byte comparisons throughout. It was reverted. Go reads a manifest
+as a byte string because a Go string *is* a byte string, which is its type
+system and not a decision worth porting. A `SKILL.md` is a text document. A
+line that is not text is skipped, and the cost of the alternative was paid on
+every line of two other files for an input no editor produces.
+
+The key of an injected line is still read at byte level, because that is three
+lines and `strip` has to restore a file exactly.
+
 ### Deliberate divergences this review settled
 
 These differ from go-skill-embed on purpose. Each is a place where the Go
@@ -361,6 +387,7 @@ behaviour looked accidental rather than chosen.
 | A custom agent whose project directory is one component, such as `skills` | Go takes `filepath.Dir("skills")`, which is `"."`, and a marker of `.` always exists, so the search stops at the working directory. Here such an agent contributes no marker and the search walks to the repository root |
 | A skill at the root of the tree with no `name` field | Go names it after whatever string the caller passed as the root, which `include_dir!` cannot supply. It is an error that says so |
 | `safe_join` refuses `a/../b` | Go's `path.Clean` accepts it as `b`. Only a caller writing its own file list can produce one, and a `..` inside an embedded path is never meant |
+| A `name` whose bytes are not text | Go installs under that name. Here the line is skipped and the source directory's name is used. See the note above on why the manifest is read as text |
 | The installed skill directory is 0755 | Go's `os.MkdirTemp` makes it 0700, which its own notes list as an accepted wart. A project checkout that another account cannot read is worse than the wart |
 | A write failure while printing help or usage replaces the reason | Go writes the help and ignores what the writer said, so `run` still answers `ErrHelp`. Here the write error wins. A front end that maps `Error::Help` to a successful exit sees a failure instead, which is the right answer when its own output did not land |
 

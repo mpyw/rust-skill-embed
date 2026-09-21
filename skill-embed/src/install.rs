@@ -478,11 +478,10 @@ impl Installer {
             // The entry's own type, which does not follow a symbolic link. A
             // link is something the user put there, and the sweep removes what
             // it finds, so it must not reach through one.
-            let is_dir = entry
-                .file_type()
-                .map_err(|e| Error::io(format!("read {}", entry.path().display()), e))?
-                .is_dir();
-            if !is_dir {
+            // An entry whose type cannot be read is one the sweep cannot claim,
+            // so it is passed over rather than made to end the run. Go reads
+            // the type off the directory entry, where it cannot fail at all.
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
             // A name that is not UTF-8 is not a skill name, so nothing embedded
@@ -520,7 +519,7 @@ impl Installer {
             let Ok(actual) = Tree::read_dir(&dest).map(|t| t.digest()) else {
                 continue;
             };
-            if Some(&actual) != recorded {
+            if recorded != Some(&actual) {
                 continue; // not what this tool left there, so not this tool's to take
             }
 

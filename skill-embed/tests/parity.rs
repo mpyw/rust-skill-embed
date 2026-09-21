@@ -142,3 +142,39 @@ fn an_installed_skill_keeps_its_own_manifest_bytes() {
     assert!(installed.contains("license: MIT"), "a field the tool does not know was lost");
     assert!(installed.contains("# Demo skill"), "the body was lost");
 }
+
+/// The write stages into a fresh directory and creates each file new, so a
+/// second file at one path would fail half way through a run with nothing but
+/// "file exists". The set is where the path can be named.
+#[test]
+fn two_files_at_one_path_are_refused_with_the_path() {
+    let files = [
+        skill_embed::File::new("demo/SKILL.md", b"---\nname: demo\n---\nbody\n".to_vec()),
+        skill_embed::File::new("demo/dup.md", b"first\n".to_vec()),
+        skill_embed::File::new("demo/dup.md", b"second\n".to_vec()),
+    ];
+    let Err(Error::Skills(message)) = skill_embed::SkillSet::from_files(files) else {
+        panic!("one path was given twice and accepted");
+    };
+    assert!(message.contains("demo/dup.md"), "{message}");
+}
+
+/// A lossy `--dir` names a different directory, and two distinct names collide
+/// on one replacement character. The command refuses what it cannot read.
+#[cfg(unix)]
+#[test]
+fn an_argument_this_command_cannot_read_is_refused() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt as _;
+
+    let (skills, _, err) = captured(skills(&["demo-skill"]));
+    let argv = [
+        OsString::from("mylint"),
+        OsString::from("skill"),
+        OsString::from("list"),
+        OsString::from("--dir"),
+        OsString::from_vec(b"/tmp/a\xff".to_vec()),
+    ];
+    assert_eq!(skills.intercept_args(&argv), Some(std::process::ExitCode::FAILURE));
+    assert!(err.text().contains("is not UTF-8"), "{}", err.text());
+}

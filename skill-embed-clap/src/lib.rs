@@ -115,12 +115,14 @@ fn flags(command: Command, skills: &Installer) -> Command {
 /// Fails when `--scope` names neither scope, which a [`Command`] built by
 /// [`command`] refuses before this is reached.
 pub fn options(matches: &ArgMatches) -> Result<InstallOptions> {
-    let agents = matches
-        .get_many::<String>("agent")
-        .into_iter()
-        .flatten()
-        .flat_map(|v| AgentSelector::parse_list(v).collect::<Vec<_>>())
-        .collect();
+    let given: Vec<&String> = matches.get_many::<String>("agent").into_iter().flatten().collect();
+    let agents: Vec<AgentSelector> =
+        given.iter().flat_map(|v| AgentSelector::parse_list(v).collect::<Vec<_>>()).collect();
+    // A value that names nothing is a mistake, and an empty list reads as "use
+    // the default" everywhere below. Only a front end knows the flag was given.
+    if !given.is_empty() && agents.is_empty() {
+        return Err(Error::NoAgentSelected);
+    }
     let scope = match matches.get_one::<String>("scope") {
         Some(s) => Some(s.parse::<Scope>()?),
         None => None,

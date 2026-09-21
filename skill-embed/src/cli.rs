@@ -123,11 +123,22 @@ impl Installer {
         if argv.get(1)?.as_ref() != OsStr::new(self.command_name()) {
             return None;
         }
-        // Past the guard, the arguments are this command's own. A skill name is
-        // always UTF-8, so one that is not cannot match an embedded skill, and
-        // it comes back as an unknown name rather than as a panic.
-        let rest: Vec<String> =
-            argv[2..].iter().map(|a| a.as_ref().to_string_lossy().into_owned()).collect();
+        // Past the guard, the arguments are this command's own. One that is not
+        // UTF-8 is refused rather than replaced: a lossy `--dir` names a
+        // different directory, and two distinct names can collide on one
+        // replacement character. The library still takes any `PathBuf`.
+        let mut rest = Vec::with_capacity(argv.len().saturating_sub(2));
+        for arg in &argv[2..] {
+            let Some(text) = arg.as_ref().to_str() else {
+                let _ = self.print_err(&format!(
+                    "{}: {:?} is not UTF-8, so this command cannot read it\n",
+                    self.tool_name(),
+                    arg.as_ref().to_string_lossy()
+                ));
+                return Some(ExitCode::FAILURE);
+            };
+            rest.push(text.to_owned());
+        }
         Some(match self.run(&rest) {
             Ok(()) | Err(Error::Help) => ExitCode::SUCCESS,
             Err(e) => {

@@ -99,9 +99,9 @@ fn trim_end<'a>(mut b: &'a [u8], set: &[u8]) -> &'a [u8] {
 /// Reads the top level `key: value` scalars. Nested mappings, sequences and
 /// block scalars are skipped rather than misread.
 ///
-/// A line that is not UTF-8 is skipped with them. Nothing this reads for is
-/// spelled in anything else, and the bytes it cannot name it also must not
-/// rewrite.
+/// A manifest is a text document, so a line that is not UTF-8 is skipped with
+/// them. Go reads one because a Go string is a byte string, which is its type
+/// system rather than a decision worth porting.
 pub(crate) fn fields(src: &[u8]) -> BTreeMap<String, String> {
     let Some(b) = locate(src) else {
         return BTreeMap::new();
