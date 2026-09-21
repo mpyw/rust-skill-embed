@@ -12,8 +12,6 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-/// Only the symlink test reads a state by name, and that test is Unix only.
-#[cfg(unix)]
 fn state_of(statuses: &[skill_embed::InstallStatus], name: &str) -> State {
     statuses.iter().find(|st| st.skill == name).unwrap_or_else(|| panic!("no row for {name}")).state
 }
@@ -97,9 +95,11 @@ fn a_blocked_destination_does_not_stop_the_others() {
 /// Anything in an installed directory that cannot be hashed, such as a symlink
 /// a user dropped in, used to fail the whole run for every skill at that
 /// target, `--force` included. The only way out was `rm -rf`.
-#[cfg(unix)]
 #[test]
 fn an_unreadable_install_stays_repairable() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("unreadable");
     let dest = tmp.join("skills");
     let skills = installer(testdata());
@@ -107,7 +107,7 @@ fn an_unreadable_install_stays_repairable() {
 
     skills.install(&options).1.expect("the first install");
     let link = dest.join("demo-skill/link.txt");
-    std::os::unix::fs::symlink(tmp.join("elsewhere"), &link).expect("the symlink");
+    common::link_file(&tmp.join("elsewhere"), &link).expect("the symlink");
 
     let statuses = skills.status(&options).expect("status survives a symlink");
     assert_eq!(state_of(&statuses, "demo-skill"), State::Foreign);

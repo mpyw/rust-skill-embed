@@ -245,15 +245,17 @@ fn detected_falls_back_to_every_agent() {
 
 /// A link committed at `.claude/skills`, or at any directory above it, aims a
 /// project install and a later forced removal wherever it points.
-#[cfg(unix)]
 #[test]
 fn a_project_install_stays_inside_the_project() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("escape");
     let env = Env::new();
     env.home(&tmp.mkdir("home"));
     let root = tmp.mkdir("repo");
     let outside = tmp.mkdir("outside");
-    std::os::unix::fs::symlink(&outside, root.join(".claude")).expect("the link");
+    common::link_dir(&outside, &root.join(".claude")).expect("the link");
 
     let skills = installer(skills(&["demo-skill"])).with_project_root(&root);
     let Err(Error::ProjectEscapes { real, .. }) = skills.targets(&claude_only()) else {
@@ -268,15 +270,17 @@ fn a_project_install_stays_inside_the_project() {
 
 /// A repository that keeps its skills elsewhere in its own tree and links to
 /// them is doing nothing wrong. What matters is where the link lands.
-#[cfg(unix)]
 #[test]
 fn a_link_that_stays_inside_the_project_is_followed() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("inside-link");
     let env = Env::new();
     env.home(&tmp.mkdir("home"));
     let root = tmp.mkdir("repo");
     tmp.mkdir("repo/shared");
-    std::os::unix::fs::symlink(root.join("shared"), root.join(".claude")).expect("the link");
+    common::link_dir(&root.join("shared"), &root.join(".claude")).expect("the link");
 
     let skills = installer(skills(&["demo-skill"])).with_project_root(&root);
     skills.targets(&claude_only()).expect("a link inside the project was refused");
@@ -302,14 +306,16 @@ fn a_custom_agent_cannot_climb_out_of_the_project() {
 
 /// User scope and `--dir` are the user naming a place, so a home directory
 /// moved with a link keeps working.
-#[cfg(unix)]
 #[test]
 fn user_scope_is_not_bounded_the_same_way() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("user-link");
     let env = Env::new();
     let real_home = tmp.mkdir("real-home");
     let linked = tmp.join("home");
-    std::os::unix::fs::symlink(&real_home, &linked).expect("the link");
+    common::link_dir(&real_home, &linked).expect("the link");
     env.home(&linked);
     Env::set("CLAUDE_CONFIG_DIR", None);
 

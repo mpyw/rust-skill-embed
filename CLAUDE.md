@@ -350,6 +350,30 @@ holds the interleaving names. The rest are unit tests in `manifest.rs`.
 | `--agent ""` | Parsed to nothing, and an empty list reads as "use the default" everywhere below, so the run silently installed for every agent. Only the front end knows the flag was given |
 | `--dir ""` | Resolved to the working directory, so every skill landed loose in whatever directory the tool was run from |
 
+### Tests that only one platform runs
+
+**Leaving the symbolic link tests `#[cfg(unix)]`.** They compile out on
+Windows, and `projectroot::within` is the guard against a link committed at
+`.claude` aiming a project install anywhere on the disk. That is the one case
+neither this library nor go-skill-embed treats as the user's own doing, and it
+had no Windows coverage at all.
+
+Windows grants the privilege to an administrator or to a machine in developer
+mode, so it belongs to the account rather than to the platform. Measured:
+go-skill-embed's helper creates a link to find out, and fails rather than skips
+when `GITHUB_ACTIONS` is set, so that a green tick cannot mean "skipped in
+silence". Its Windows job is green, so a runner has the privilege.
+`common::symlinks_available` does the same here.
+
+**Writing the non-Unicode argument tests against `OsStringExt::from_vec`.**
+That is Unix's hole. Windows has its own: a sequence of 16 bit units may hold
+an unpaired surrogate. `common::not_unicode` makes one on each platform, so the
+argument tests run on both.
+
+The executable bit tests stay `#[cfg(unix)]`. Windows has no such bit, and a
+test that compiled out is greppable in a way that a test passing without
+reaching what it is named for is not.
+
 ### A second round, against the fixes
 
 The same reviewer read the port again, against the list above. Sixteen of the
@@ -516,6 +540,7 @@ disk. That one is not on the list below: `projectroot::within` refuses it.
 | `InstallOptions::names` is not deduplicated | Naming a skill twice writes it twice |
 | A BOM moves into the body | Only when `with` creates a frontmatter block that was not there |
 | `quote` and `unquote` are asymmetric | A tool name holding a quote or a backslash never reads back, so the skill stays `foreign` |
+| The executable bit check asks the platform, not the file system | `executable_bits_match` short circuits on `!cfg!(unix)`. Some mounts synthesise modes: vfat, exfat, SMB without the Unix extensions, WSL2's `/mnt/c` with metadata off. A Unix binary installing onto one gets a single mode for every file. Something then always disagrees with the rule, so the skill reads `outdated` on every run and a byte-identical tree is rewritten each time. A probe at the destination cannot tell such a mount from a user who ran `chmod +x` on one file. That user is the case the check exists for |
 | A file inside an installed skill whose name is not UTF-8 | `Tree::read_dir` refuses it, so the copy reads as `foreign` where Go hashes the bytes and reads `modified`. Neither tool writes such a name, so it takes a user putting one there, and both then ask for `--force` |
 
 ## What the port changed

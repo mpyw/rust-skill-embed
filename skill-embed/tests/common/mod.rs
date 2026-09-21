@@ -119,3 +119,64 @@ pub fn captured(set: SkillSet) -> (Installer, Captured, Captured) {
         .with_error_output(err.clone());
     (installer, out, err)
 }
+
+/// Reports whether this account can create a symbolic link.
+///
+/// On Windows the privilege belongs to an administrator or to a machine in
+/// developer mode, so it belongs to the account and not to the platform. A
+/// GitHub runner has it. A test that skipped in silence there would make a
+/// green tick mean less than it looks, so CI is told to fail instead of skip.
+pub fn symlinks_available() -> bool {
+    let probe = TempDir::new("symlink-probe");
+    match link_dir(&probe.join("target"), &probe.join("link")) {
+        Ok(()) => true,
+        Err(e) if std::env::var_os("GITHUB_ACTIONS").is_some() => {
+            panic!(
+                "symbolic links are not available on this runner, so this test would be skipped in silence: {e}"
+            )
+        }
+        Err(_) => false,
+    }
+}
+
+/// Links to a directory. The target need not exist.
+pub fn link_dir(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_dir(target, link);
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "no symbolic links here"));
+}
+
+/// Links to a file. The target need not exist.
+pub fn link_file(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_file(target, link);
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "no symbolic links here"));
+}
+
+/// An argument that is not valid Unicode, which both platforms can hold and
+/// neither can render.
+///
+/// Unix takes any bytes. Windows takes any sequence of 16 bit units, including
+/// an unpaired surrogate, which is the same hole from the other side.
+pub fn not_unicode(head: &str) -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt as _;
+        let mut bytes = head.as_bytes().to_vec();
+        bytes.push(0xff);
+        std::ffi::OsString::from_vec(bytes)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt as _;
+        let mut wide: Vec<u16> = head.encode_utf16().collect();
+        wide.push(0xD800);
+        std::ffi::OsString::from_wide(&wide)
+    }
+}

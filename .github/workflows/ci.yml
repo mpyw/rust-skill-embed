@@ -1,9 +1,17 @@
 name: CI
 
 on:
-  push: {}
+  # A push to a pull request branch would otherwise run everything twice, which
+  # is eight jobs where four will do.
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+
+# A second push to one branch makes the first run's answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

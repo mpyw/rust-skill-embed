@@ -14,14 +14,12 @@ use skill_embed::{Error, InstallOptions, Installer, SKILL_FILE, State};
 /// `std::env::args` panics on an argument that is not UTF-8, and `intercept`
 /// runs before the tool has looked at its own command line. A file name the
 /// tool would have handled took the whole process down.
-#[cfg(unix)]
 #[test]
 fn a_non_utf8_argument_is_passed_over_rather_than_panicked_on() {
     use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt as _;
 
     let (skills, _, _) = captured(skills(&["demo-skill"]));
-    let argv = [OsString::from("mylint"), OsString::from_vec(b"file\xff.rs".to_vec())];
+    let argv = [OsString::from("mylint"), common::not_unicode("file")];
     assert!(skills.intercept_args(&argv).is_none(), "an ordinary argument was intercepted");
 }
 
@@ -48,39 +46,41 @@ fn an_empty_recorded_digest_is_foreign() {
 
 /// A link standing in for an installed skill is one the agent reads through, so
 /// it is described by what it points at.
-#[cfg(unix)]
 #[test]
 fn a_symlinked_destination_is_read_through() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("dest-link");
     let real = tmp.join("real");
     let skills = installer(skills(&["demo-skill"]));
     skills.install(&into_dir(&real)).1.expect("the first install");
 
     let linked = tmp.mkdir("linked");
-    std::os::unix::fs::symlink(real.join("demo-skill"), linked.join("demo-skill"))
-        .expect("the link");
+    common::link_dir(&real.join("demo-skill"), &linked.join("demo-skill")).expect("the link");
     let statuses = skills.status(&into_dir(&linked)).expect("status");
     assert_eq!(statuses[0].state, State::UpToDate, "a link to an installation read as foreign");
 
     // A link that points nowhere is nothing at all.
     let dangling = tmp.mkdir("dangling");
-    std::os::unix::fs::symlink(tmp.join("nowhere"), dangling.join("demo-skill")).expect("the link");
+    common::link_dir(&tmp.join("nowhere"), &dangling.join("demo-skill")).expect("the link");
     let statuses = skills.status(&into_dir(&dangling)).expect("status");
     assert_eq!(statuses[0].state, State::Missing);
 }
 
 /// The sweep removes what it finds, so it must not reach through a link the
 /// user put there.
-#[cfg(unix)]
 #[test]
 fn the_sweep_does_not_reach_through_a_symlink() {
+    if !common::symlinks_available() {
+        return;
+    }
     let tmp = TempDir::new("orphan-link");
     let store = tmp.join("store");
     installer(skills(&["gone-skill"])).install(&into_dir(&store)).1.expect("the store");
 
     let dest = tmp.mkdir("skills");
-    std::os::unix::fs::symlink(store.join("gone-skill"), dest.join("gone-skill"))
-        .expect("the link");
+    common::link_dir(&store.join("gone-skill"), &dest.join("gone-skill")).expect("the link");
 
     let next = installer(skills(&["demo-skill"]));
     let (results, outcome) = next.install(&into_dir(&dest));
@@ -161,11 +161,9 @@ fn two_files_at_one_path_are_refused_with_the_path() {
 
 /// A lossy `--dir` names a different directory, and two distinct names collide
 /// on one replacement character. The command refuses what it cannot read.
-#[cfg(unix)]
 #[test]
 fn an_argument_this_command_cannot_read_is_refused() {
     use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt as _;
 
     let (skills, _, err) = captured(skills(&["demo-skill"]));
     let argv = [
@@ -173,7 +171,7 @@ fn an_argument_this_command_cannot_read_is_refused() {
         OsString::from("skill"),
         OsString::from("list"),
         OsString::from("--dir"),
-        OsString::from_vec(b"/tmp/a\xff".to_vec()),
+        common::not_unicode("a-directory"),
     ];
     assert_eq!(skills.intercept_args(&argv), Some(std::process::ExitCode::FAILURE));
     assert!(err.text().contains("is not UTF-8"), "{}", err.text());

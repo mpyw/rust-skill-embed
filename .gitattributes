@@ -1,0 +1,22 @@
+# Git for Windows installs with core.autocrlf=true, so a contributor cloning
+# there gets a working tree with CRLF. `./test_all.sh` then fails before it
+# runs anything. Measured:
+#
+#   $ sed 's/$/\r/' test_all.sh > t.sh && chmod +x t.sh && ./t.sh
+#   env: bash\r: No such file or directory
+#
+# CI never sees it, because a GitHub runner does not rewrite the tree. The
+# person who hits it is a Windows contributor.
+* text=auto eol=lf
+
+# These trees are hashed, and the digest is what the two implementations of
+# this library promise each other. Letting git decide their bytes would move a
+# digest between two checkouts of one commit, and a skill installed from one
+# would read as `modified` to the other.
+#
+# Measured with core.autocrlf=true: a CRLF file under one of these paths is
+# stored and checked out with its CRLF, while a file outside them is
+# normalised to LF on both. `-text` is what does it. The `eol=lf` above has no
+# effect where `text` is unset, whatever `git check-attr` prints.
+**/skills/** -text
+**/testdata/** -text
