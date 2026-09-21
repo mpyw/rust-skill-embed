@@ -459,8 +459,10 @@ drift from a signature.
 
 [go-skill-embed](https://github.com/mpyw/go-skill-embed) is the same library
 for Go. The two agree on what they write: the agent directories, the four
-frontmatter keys, and the digest. One tool's installation reads as `foreign` to
-the other, because `x-embedded-by` names the tool rather than the language.
+frontmatter keys, and the digest. Under one tool name, an installation made by
+either reads as `up-to-date` to the other, and the two trees are identical
+apart from `x-embedded-at`. `tests/digest.rs` pins the digest to the value the
+Go library produces.
 
 ## License
 

@@ -61,10 +61,10 @@ pub(crate) fn has_shebang(_name: &str, data: &[u8]) -> bool {
 
 impl Tree {
     /// Collects files into a tree, dropping the ones an operating system left
-    /// behind and sorting the rest by path.
+    /// behind and putting the rest in walk order.
     pub(crate) fn from_files(files: impl IntoIterator<Item = File>) -> Self {
         let mut files: Vec<File> = files.into_iter().filter(|f| !is_junk(&f.path)).collect();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
+        files.sort_by(|a, b| walk_order(&a.path).cmp(&walk_order(&b.path)));
         Self { files }
     }
 
@@ -285,6 +285,20 @@ fn collect(dir: &Path, prefix: &str, out: &mut Vec<File>) -> io::Result<()> {
     Ok(())
 }
 
+/// The key that puts paths in the order a directory walk reaches them.
+///
+/// Sorting the paths as strings is not that order. A directory `b` is reached
+/// before a file `b.md`, because `ReadDir` sorts `b` before `b.md` and the walk
+/// descends at once. Comparing the strings puts `b.md` first, since `.` sorts
+/// before `/`.
+///
+/// The digest covers the files in this order, and go-skill-embed hashes the
+/// same skill through its own directory walk. A skill holding both `b.md` and
+/// `b/` hashed differently in the two until this existed.
+fn walk_order(path: &str) -> Vec<&str> {
+    path.split('/').collect()
+}
+
 /// Rejects a path that would escape `root`.
 fn safe_join(root: &Path, path: &str) -> io::Result<PathBuf> {
     let mut out = root.to_path_buf();
@@ -349,6 +363,19 @@ mod tests {
             }
         }));
         assert_eq!(plain.digest(), stamped.digest());
+    }
+
+    /// The order the digest covers the files in, which is a directory walk's
+    /// and not a string sort's.
+    #[test]
+    fn a_directory_is_reached_before_a_file_whose_name_extends_it() {
+        let tree = Tree::from_files([
+            file("b.md", "top level b\n"),
+            file("b/c.md", "inside b\n"),
+            file("ab.md", "ab\n"),
+        ]);
+        let paths: Vec<&str> = tree.files().iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["ab.md", "b/c.md", "b.md"]);
     }
 
     #[test]

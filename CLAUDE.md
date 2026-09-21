@@ -104,6 +104,14 @@ cannot be compared against the embedded original.
 the bytes, and those bytes are what the digest covers. A line that is not UTF-8
 is skipped instead. Nothing this reads for is spelled in anything else.
 
+**Putting the files in path order by sorting the strings.** Measured against
+go-skill-embed over a skill holding both `b.md` and `b/c.md`: the two digests
+differed. A directory walk reaches `b` before `b.md`, because a directory
+listing sorts `b` first and the walk descends at once. Sorting the paths as
+strings puts `b.md` first, since `.` sorts before `/`. `walk_order` splits on
+`/` and compares the components, which is the walk's order. `tests/digest.rs`
+pins the value the Go library produces.
+
 **Hashing the installed manifest as it stands.** The digest strips the four
 injected keys first. Without that, an installed copy never hashes equal to the
 skill it came from, and `up-to-date` can never be reported.
@@ -366,7 +374,6 @@ disk. That one is not on the list below: `projectroot::within` refuses it.
 | `AgentSelector::Named` can hold a comma | `parse_list` splits on commas, so such a name never round trips. It needs a custom agent through `with_agents` |
 | A `SKILL.md` that is a fifo or `/dev/zero` | It is read without a size or type guard, so it hangs or grows without bound |
 | Extra `x-embedded-at` lines carry arbitrary text | `strip` drops every injected key before hashing, so the digest cannot see them |
-| The staging directory is 0700 | Inherited from `tempfile`. Its subdirectories are 0755, and so is the installed directory after the swap |
 | A file starting with `#![no_std]` becomes executable | The shebang test cannot tell it from a script. `with_executable` is the way out |
 | A user's own `chmod +x` is reverted | The state is `outdated` either way, and install repairs it without asking |
 | Names differing only by Unicode normalization are not caught | `str::to_lowercase` is not the file system's equivalence relation. It catches the ASCII case, which is the one that happens |
