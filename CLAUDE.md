@@ -183,6 +183,37 @@ this reader is not sent looking for one.
 between there and the rename is not caught. The case it is for is a link
 committed into a repository, which is there before the run starts.
 
+### Reading the environment
+
+**Splitting a config directory variable on both `:` and `;`.** It reads as
+covering either platform. A Windows path holds a `:` of its own, so
+`CLAUDE_CONFIG_DIR=C:\\Users\\me\\.claude` was cut at the drive letter and user
+scope resolved to `C\\skills`. Go reaches the right answer through
+`filepath.ListSeparator`, which is one character per platform. `LIST_SEPARATOR`
+is the same thing. The Windows CI job is what found it.
+
+### Tests that read the platform
+
+**Setting `HOME` to point a test at a temporary home directory.**
+`std::env::home_dir` reads `HOME` on Unix and `USERPROFILE` on Windows. A test
+that sets `HOME` sets nothing on Windows, and the subject under test then reads
+the real home directory. Two end-to-end tests wrote a user scope install into
+the runner's own home directory, and a project run from the temporary "home"
+was not refused. `HOME_VAR` names the variable the platform reads, and both
+`tests/scope.rs` and the example's tests use it.
+
+**Comparing a resolved project root against `fs::canonicalize`.** It was added
+because macOS answers `current_dir` with `/private/var/...` where the temporary
+directory was handed out as `/var/...`. On Windows `canonicalize` answers with
+a `\\?\` path, which nothing under test produces, so the fix for one platform
+broke another. The search starts from the working directory, so `Env::cd`
+answers with the working directory as the operating system gives it back, and
+the expected paths are built from that. It needs no platform in it at all.
+
+**Guarding a Unix-only test body with `#[cfg(not(unix))] return;`.** On Windows
+the body is compiled out and the function is a bare `return;`, which clippy
+reports. `#[cfg(unix)]` on the function is what every other test here uses.
+
 ### Cancellation
 
 **A `context::Context` of this project's own.** Go passes one into every call.

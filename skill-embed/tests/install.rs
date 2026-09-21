@@ -12,6 +12,8 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
+/// Only the symlink test reads a state by name, and that test is Unix only.
+#[cfg(unix)]
 fn state_of(statuses: &[skill_embed::InstallStatus], name: &str) -> State {
     statuses.iter().find(|st| st.skill == name).unwrap_or_else(|| panic!("no row for {name}")).state
 }

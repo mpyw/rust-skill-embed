@@ -9,6 +9,13 @@ use crate::{Error, Result, Scope, paths};
 /// The directory agreed on by every agent except Claude Code.
 const SHARED_PROJECT_DIR: &str = ".agents/skills";
 
+/// What separates the roots in a variable that may name several.
+///
+/// It is one character per platform, and not both of them. Splitting on `:`
+/// everywhere cut `C:\\Users\\...` at the drive letter, so `CLAUDE_CONFIG_DIR`
+/// resolved to `C\\skills` on Windows.
+const LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
+
 /// How an agent's user scope directory is found.
 #[derive(Clone)]
 enum UserDir {
@@ -34,7 +41,7 @@ impl UserDir {
             Self::EnvOrHome { env, env_parts, home_parts } => {
                 // A config dir may hold several separated roots. The first wins.
                 let root = std::env::var(env).ok().and_then(|v| {
-                    let first = v.split([':', ';']).next().unwrap_or("").trim().to_owned();
+                    let first = v.split(LIST_SEPARATOR).next().unwrap_or("").trim().to_owned();
                     (!first.is_empty()).then_some(first)
                 });
                 match root {
