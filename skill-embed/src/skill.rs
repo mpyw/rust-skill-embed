@@ -129,18 +129,8 @@ impl SkillSet {
     }
 
     fn from_tree_files(files: Vec<tree::File>) -> Result<Self> {
-        // Refused rather than skipped. An installed skill sits where a file
-        // browser can reach it, and one of these appearing beside it is not the
-        // user editing the skill. An embedded one is different: it was
-        // committed, and it ships to everyone.
-        if let Some(junk) = files.iter().find(|f| tree::is_junk(&f.path)) {
-            return Err(Error::Skills(format!(
-                "{} was left behind by an operating system and was embedded with the skills. \
-                 Remove the file",
-                junk.path
-            )));
-        }
-
+        let junk: Vec<String> =
+            files.iter().filter(|f| tree::is_junk(&f.path)).map(|f| f.path.clone()).collect();
         let whole = Tree::from_files(files);
         let mut skills = if whole.get(SKILL_FILE).is_some() {
             vec![read_skill(&whole, "")?]
@@ -158,6 +148,26 @@ impl SkillSet {
         };
         if skills.is_empty() {
             return Err(Error::Skills(format!("no {SKILL_FILE} found among the embedded files")));
+        }
+        // Refused rather than skipped, but only inside a skill. An installed
+        // skill sits where a file browser can reach it, and one of these
+        // appearing beside it is not the user editing the skill. An embedded
+        // one is different: it was committed, and it ships to everyone.
+        //
+        // One that is not inside any skill ships too, and is never installed.
+        // Failing the whole set over it would crash a user's binary over a file
+        // the skills do not contain.
+        let inside = |p: &String| {
+            skills
+                .iter()
+                // The separator matters: `demo-other/x` is not inside `demo`.
+                .any(|sk| sk.dir.is_empty() || p.starts_with(&format!("{}/", sk.dir)))
+        };
+        if let Some(path) = junk.iter().find(|p| inside(p)) {
+            return Err(Error::Skills(format!(
+                "{path} was left behind by an operating system and was embedded with a skill. \
+                 Remove the file"
+            )));
         }
         skills.sort_by(|a, b| a.name.cmp(&b.name));
         check_names(&skills)?;
@@ -205,19 +215,6 @@ impl File {
     pub fn new(path: impl Into<String>, data: impl Into<Cow<'static, [u8]>>) -> Self {
         Self(tree::File { path: path.into(), data: data.into(), executable: false })
     }
-
-    /// Marks the file as carrying the executable bit.
-    ///
-    /// Nothing reads this on the way in: [`Installer::with_executable`] decides
-    /// what is written. It is here so that a source which does carry modes can
-    /// say so.
-    ///
-    /// [`Installer::with_executable`]: crate::Installer::with_executable
-    #[must_use]
-    pub fn executable(mut self, on: bool) -> Self {
-        self.0.executable = on;
-        self
-    }
 }
 
 fn read_skill(whole: &Tree, dir: &str) -> Result<Skill> {
@@ -226,6 +223,15 @@ fn read_skill(whole: &Tree, dir: &str) -> Result<Skill> {
     let fields = manifest::fields(src);
     let name = match fields.get("name") {
         Some(name) if !name.is_empty() => name.clone(),
+        // A skill in a directory takes that directory's name. One at the root
+        // of the tree has no directory to take a name from, so it has to carry
+        // one.
+        _ if dir.is_empty() => {
+            return Err(Error::Skills(format!(
+                "the {SKILL_FILE} at the root of the tree has no `name` field, \
+                 and there is no directory to take one from"
+            )));
+        }
         _ => dir.rsplit('/').next().unwrap_or(dir).to_owned(),
     };
     check_name(&name).map_err(|e| Error::Skills(format!("{dir}: {e}")))?;

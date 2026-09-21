@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::process::ExitCode;
 use std::str::FromStr as _;
 
@@ -108,18 +109,26 @@ impl Installer {
     /// the subcommand, or before a normal run.
     #[must_use]
     pub fn intercept(&self) -> Option<ExitCode> {
-        let argv: Vec<String> = std::env::args().collect();
-        self.intercept_args(&argv)
+        // `args_os`, not `args`. The latter panics on an argument that is not
+        // UTF-8, and this runs before the tool has looked at its own command
+        // line, so a file name the tool would have handled took the whole
+        // process down.
+        self.intercept_args(&std::env::args_os().collect::<Vec<_>>())
     }
 
     /// [`Installer::intercept`] against arguments the caller supplies, starting
     /// with the program name.
     #[must_use]
-    pub fn intercept_args(&self, argv: &[String]) -> Option<ExitCode> {
-        if argv.get(1).map(String::as_str) != Some(self.command_name()) {
+    pub fn intercept_args<S: AsRef<OsStr>>(&self, argv: &[S]) -> Option<ExitCode> {
+        if argv.get(1)?.as_ref() != OsStr::new(self.command_name()) {
             return None;
         }
-        Some(match self.run(&argv[2..]) {
+        // Past the guard, the arguments are this command's own. A skill name is
+        // always UTF-8, so one that is not cannot match an embedded skill, and
+        // it comes back as an unknown name rather than as a panic.
+        let rest: Vec<String> =
+            argv[2..].iter().map(|a| a.as_ref().to_string_lossy().into_owned()).collect();
+        Some(match self.run(&rest) {
             Ok(()) | Err(Error::Help) => ExitCode::SUCCESS,
             Err(e) => {
                 let _ = self.print_err(&format!("{}: {e}\n", self.tool_name()));
@@ -161,6 +170,7 @@ impl Installer {
             InstallOptions { scope: Some(self.default_scope()), ..Default::default() };
         let mut rest = args.iter();
         let mut positional_only = false;
+        let mut agent_given = false;
 
         while let Some(arg) = rest.next() {
             if positional_only || !arg.starts_with('-') || arg == "-" {
@@ -194,7 +204,16 @@ impl Installer {
                 },
             };
             match (flag.long, value) {
-                ("agent", Some(v)) => options.agents.extend(AgentSelector::parse_list(&v)),
+                ("agent", Some(v)) => {
+                    // A value that names nothing is a mistake, and an empty
+                    // `agents` reads as "use the default" everywhere below.
+                    // Only the front end knows the flag was given at all.
+                    agent_given = true;
+                    options.agents.extend(AgentSelector::parse_list(&v));
+                }
+                ("dir", Some(v)) if v.is_empty() => {
+                    return self.usage_error(sub, "--dir must name a directory".to_owned());
+                }
                 ("dir", Some(v)) => options.dir = Some(v.into()),
                 ("scope", Some(v)) => match Scope::from_str(&v) {
                     Ok(scope) => options.scope = Some(scope),
@@ -208,6 +227,9 @@ impl Installer {
                 }
                 _ => unreachable!("every flag is handled"),
             }
+        }
+        if agent_given && options.agents.is_empty() {
+            return self.usage_error(sub, Error::NoAgentSelected.to_string());
         }
         Ok(options)
     }

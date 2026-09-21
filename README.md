@@ -58,11 +58,13 @@ fn main() -> ExitCode {
 | Where the file is | What happens |
 | --- | --- |
 | Inside an embedded skill | `SkillSet` refuses the skill and names the file |
+| Beside the skills, inside no skill | Ignored. Nothing installs it |
 | Beside an installed skill | Ignored. The skill still reads as `up-to-date` |
 
-An embedded one was committed, and it ships to everyone. An installed skill
-sits in a directory a user may open in a file browser. Such a file appears
-there on its own.
+One inside a skill was committed, and it ships to everyone. One beside the
+skills ships too, and is never installed, so refusing it would stop a binary
+over a file its skills do not contain. An installed skill sits in a directory a
+user may open in a file browser. Such a file appears there on its own.
 
 ## Where skills go
 
@@ -373,7 +375,7 @@ Every option is a method on `Installer`, and each one returns the installer.
 | `with_project_root` | The searched project root | What project scope resolves against |
 | `with_metadata` | On | Writes the four `x-embedded-*` keys |
 | `with_executable` | Shebang test | Decides which files become executable |
-| `with_output` | Standard output | Where `run` writes the report and the help |
+| `with_output` | Standard output | Where every front end writes the report, and where `run` writes the help |
 | `with_error_output` | Standard error | Where `run` writes a complaint and the usage |
 
 > [!CAUTION]
@@ -402,7 +404,9 @@ fn install_for_claude_code(skills: &Installer) -> Result<()> {
 ```
 
 `render_results` and `render_status` turn those values into the text the
-built-in command prints. A front end that calls them reports the same way.
+built-in command prints. `Installer::write_report` sends that text where
+`with_output` points, so a front end that calls all three reports the same way
+to the same place. The clap adapter does.
 
 `InstallOptions::cancel` stops a run between skills. A single skill is written
 whole or not at all, so the flag is read between them rather than during one.

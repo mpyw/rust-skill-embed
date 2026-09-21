@@ -283,6 +283,18 @@ fn an_embedded_junk_file_is_refused() {
     assert!(message.contains(".DS_Store"), "{message}");
 }
 
+/// One that is not inside any skill ships too, and is never installed.
+/// Failing the whole set over it would crash a user's binary over a file the
+/// skills do not contain.
+#[test]
+fn a_junk_file_outside_every_skill_is_left_alone() {
+    let mut files = skill_files("demo-skill", &[]);
+    files.push(skill_embed::File::new(".DS_Store", b"\x00".to_vec()));
+    files.push(skill_embed::File::new("demo-skill-notes/.DS_Store", b"\x00".to_vec()));
+    let set = SkillSet::from_files(files).expect("junk outside a skill is not the skill's");
+    assert_eq!(set.len(), 1);
+}
+
 #[test]
 fn an_installed_junk_file_is_ignored() {
     let tmp = TempDir::new("junk");

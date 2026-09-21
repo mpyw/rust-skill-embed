@@ -40,12 +40,21 @@ impl UserDir {
             Self::Home(parts) => Ok(join(paths::home()?, parts)),
             Self::EnvOrHome { env, env_parts, home_parts } => {
                 // A config dir may hold several separated roots. The first wins.
-                let root = std::env::var(env).ok().and_then(|v| {
-                    let first = v.split(LIST_SEPARATOR).next().unwrap_or("").trim().to_owned();
-                    (!first.is_empty()).then_some(first)
+                let raw = std::env::var_os(env);
+                let root = raw.as_deref().and_then(|v| match v.to_str() {
+                    // The whole value is trimmed, and then cut at the first
+                    // separator. A root whose own name ends in a space keeps it,
+                    // which is the order the Go original reaches too.
+                    Some(s) => {
+                        let first = s.trim().split(LIST_SEPARATOR).next().unwrap_or("");
+                        (!first.is_empty()).then(|| PathBuf::from(first))
+                    }
+                    // Not Unicode, so it cannot be trimmed or split as text. It
+                    // is one path, and it is taken as it stands.
+                    None => Some(PathBuf::from(v)),
                 });
                 match root {
-                    Some(root) => Ok(join(PathBuf::from(root), env_parts)),
+                    Some(root) => Ok(join(root, env_parts)),
                     None => Ok(join(paths::home()?, home_parts)),
                 }
             }
@@ -220,7 +229,9 @@ impl Agent {
                     None => std::env::current_dir()
                         .map_err(|e| Error::io("read the working directory", e))?,
                 };
-                Ok(join(root, &self.project_dir.split('/').collect::<Vec<_>>()))
+                let mut dir = root;
+                dir.extend(self.project_dir.split('/'));
+                Ok(dir)
             }
             Scope::User => self.user_dir.resolve().map_err(|e| {
                 Error::io(format!("resolve the user scope directory for {}", self.name), e)
@@ -294,22 +305,25 @@ pub(crate) fn resolve(
     values: &[AgentSelector],
     detected: &dyn Fn(&Agent) -> bool,
 ) -> Result<Vec<Agent>> {
-    let mut out: Vec<Agent> = Vec::new();
-    let push = |a: &Agent, out: &mut Vec<Agent>| {
+    /// Adds an agent unless the list already names it. The two group words can
+    /// both reach one agent, and a value may be repeated.
+    fn push(out: &mut Vec<Agent>, a: &Agent) {
         if !out.iter().any(|k| k.name() == a.name()) {
             out.push(a.clone());
         }
-    };
+    }
+
+    let mut out: Vec<Agent> = Vec::new();
     for v in values {
         match v {
             AgentSelector::All => {
                 for a in known {
-                    push(a, &mut out);
+                    push(&mut out, a);
                 }
             }
             AgentSelector::Detected => {
                 for a in known.iter().filter(|a| detected(a)) {
-                    push(a, &mut out);
+                    push(&mut out, a);
                 }
             }
             AgentSelector::Named(name) => {
@@ -319,7 +333,7 @@ pub(crate) fn resolve(
                     valid.sort();
                     return Err(Error::UnknownAgent { name: name.clone(), valid });
                 };
-                push(a, &mut out);
+                push(&mut out, a);
             }
         }
     }

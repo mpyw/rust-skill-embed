@@ -3,29 +3,21 @@
 //! Nothing here knows about skills. It walks a file system and answers with a
 //! directory.
 
-use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::paths;
 
 /// Why a root could not be chosen.
+///
+/// The advice that goes with each of these is in this library's vocabulary
+/// rather than the search's, so `install.rs` turns them into a [`crate::Error`]
+/// and no message is written here.
 #[derive(Debug)]
 pub(crate) enum FindError {
     /// The search landed on the home directory.
     IsHome(PathBuf),
     Io(io::Error),
-}
-
-impl fmt::Display for FindError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IsHome(dir) => {
-                write!(f, "the search landed on the home directory ({})", dir.display())
-            }
-            Self::Io(e) => e.fmt(f),
-        }
-    }
 }
 
 impl From<io::Error> for FindError {
@@ -100,17 +92,6 @@ fn has_marker(dir: &Path, markers: &[PathBuf]) -> bool {
 pub(crate) struct OutsideRoot {
     pub(crate) dir: PathBuf,
     pub(crate) real: PathBuf,
-}
-
-impl fmt::Display for OutsideRoot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "the destination is outside the project root ({} is really {})",
-            self.dir.display(),
-            self.real.display()
-        )
-    }
 }
 
 /// Why a destination could not be accepted.

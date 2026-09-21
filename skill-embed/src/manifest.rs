@@ -24,7 +24,7 @@ pub(crate) const KEY_EMBEDDED_DIGEST: &str = "x-embedded-digest";
 ///
 /// They are namespaced so they never collide with the source tracking keys
 /// `gh skill install` writes.
-pub(crate) const INJECTED_KEYS: [&str; 4] =
+const INJECTED_KEYS: [&str; 4] =
     [KEY_EMBEDDED_BY, KEY_EMBEDDED_VERSION, KEY_EMBEDDED_AT, KEY_EMBEDDED_DIGEST];
 
 const DELIM: &[u8] = b"---";
@@ -215,7 +215,7 @@ pub(crate) fn normalize(src: &[u8]) -> Cow<'_, [u8]> {
     let Some(b) = locate(&stripped) else {
         return stripped;
     };
-    if !stripped[b.start..b.end].iter().all(u8::is_ascii_whitespace) {
+    if !is_blank(&stripped[b.start..b.end]) {
         return stripped;
     }
     let mut out = Vec::with_capacity(stripped.len());
@@ -224,9 +224,20 @@ pub(crate) fn normalize(src: &[u8]) -> Cow<'_, [u8]> {
     Cow::Owned(out)
 }
 
+/// Reports whether the bytes are whitespace and nothing else.
+///
+/// The count is in characters. Go's `bytes.TrimSpace` reads runes, so a block
+/// holding one U+00A0 is empty to it. Counting only ASCII whitespace left such
+/// a block in place, and the two implementations then hashed the same skill
+/// differently. Bytes that are not UTF-8 are not whitespace, which is the
+/// answer `TrimSpace` reaches for them too.
+fn is_blank(b: &[u8]) -> bool {
+    std::str::from_utf8(b).is_ok_and(|s| s.chars().all(char::is_whitespace))
+}
+
 /// Removes the injected keys and nothing else. [`with`] uses it so that
 /// stamping twice does not accumulate duplicates.
-pub(crate) fn strip(src: &[u8]) -> Cow<'_, [u8]> {
+fn strip(src: &[u8]) -> Cow<'_, [u8]> {
     let Some(b) = locate(src) else {
         return Cow::Borrowed(src);
     };
@@ -255,16 +266,20 @@ pub(crate) fn strip(src: &[u8]) -> Cow<'_, [u8]> {
 }
 
 fn is_injected(line: &[u8]) -> bool {
-    let Ok(text) = std::str::from_utf8(trim_end(line, SPACE)) else {
-        return false;
-    };
+    let line = trim_end(line, SPACE);
     // An indented line belongs to whatever is above it. That may be a block
     // scalar holding a line that looks exactly like one of these keys.
     // `fields` skips those, and this has to skip them for the same reason.
-    if text.starts_with([' ', '\t']) {
+    if line.first().is_none_or(|b| matches!(b, b' ' | b'\t')) {
         return false;
     }
-    text.split_once(':').is_some_and(|(key, _)| INJECTED_KEYS.contains(&key.trim()))
+    // Only the key is read as text. A value that is not UTF-8 still belongs to
+    // one of these keys, and a line left behind is one that a second stamp
+    // writes again beside it.
+    let Some(colon) = line.iter().position(|&b| b == b':') else {
+        return false;
+    };
+    std::str::from_utf8(&line[..colon]).is_ok_and(|key| INJECTED_KEYS.contains(&key.trim()))
 }
 
 #[cfg(test)]
@@ -369,6 +384,42 @@ description: \"A demo, with a colon: right here\"
         assert_eq!(text(&strip(&stamped)), src);
         // The real key is still the one that reads back.
         assert_eq!(fields(&stamped)[KEY_EMBEDDED_DIGEST], "sha256:real");
+    }
+
+    /// Go's `bytes.TrimSpace` reads runes, so a block holding one U+00A0 or one
+    /// vertical tab is empty to it. Counting only ASCII whitespace left such a
+    /// block in place, and the two implementations then hashed the same skill
+    /// differently.
+    #[test]
+    fn a_block_of_unicode_whitespace_is_empty() {
+        let entries = [entry(KEY_EMBEDDED_BY, "mytool")];
+        for blank in ["\u{a0}", "\u{b}", "\u{2028}", " \t\n"] {
+            let src = format!("---\n{blank}\n---\nbody\n");
+            assert_eq!(
+                normalize(src.as_bytes()),
+                normalize(b"body\n"),
+                "a block of {blank:?} did not read as empty"
+            );
+            let stamped = with(src.as_bytes(), &entries);
+            assert_eq!(normalize(&stamped), normalize(src.as_bytes()));
+        }
+        // A byte that is not UTF-8 is not whitespace, which is the answer
+        // `TrimSpace` reaches for it too.
+        let real = b"---\n\xff\n---\nbody\n";
+        assert_eq!(normalize(real), Cow::Borrowed(&real[..]));
+    }
+
+    /// The key is what says a line is one of ours. A value that is not UTF-8
+    /// belongs to the key all the same, and a line left behind is one a second
+    /// stamp writes again beside it.
+    #[test]
+    fn an_injected_line_is_stripped_whatever_its_value_holds() {
+        let src = b"---\nname: demo\nx-embedded-digest: \xff\n---\nbody\n";
+        let stripped = strip(src);
+        assert_eq!(stripped.as_ref(), b"---\nname: demo\n---\nbody\n");
+
+        let stamped = with(src, &[entry(KEY_EMBEDDED_DIGEST, "sha256:real")]);
+        assert_eq!(text(&stamped).matches("x-embedded-digest:").count(), 1, "{}", text(&stamped));
     }
 
     #[test]

@@ -312,6 +312,72 @@ Rust `main` returning `ExitCode` has no need for. `intercept` answers with
 `Option<ExitCode>`, so the caller decides. `None` means the arguments were not
 for this command.
 
+## What an adversarial review found
+
+Two reviewers read this port against go-skill-embed line by line, built probe
+binaries for both libraries, and ran the same fixtures through each. Everything
+below was measured, not argued. It is recorded because every one of these is a
+place a port drifts silently, and the next port of this library will drift
+there too.
+
+### The digest, which is the promise
+
+| | |
+| --- | --- |
+| A frontmatter block holding only U+00A0, a vertical tab or U+2028 | `is_ascii_whitespace` does not know them, so the block stayed and the two digests differed. `is_blank` decodes and asks `char::is_whitespace`, which is the `White_Space` property Go's `unicode.IsSpace` uses |
+| An injected line whose value is not UTF-8 | The whole line failed to decode, so `strip` left it, the digest differed, and a second stamp wrote a duplicate key. Only the key is read as text now |
+| A skill holding both `b.md` and `b/` | Recorded above under the sort |
+
+`tests/digest.rs` pins the value the Go library produces. The fixture it builds
+holds the interleaving names. The rest are unit tests in `manifest.rs`.
+
+### What lands on disk
+
+| | |
+| --- | --- |
+| A write that failed reported `installed` | The row was added before the I/O. It is added after now, so a failure prints its error and no row |
+| The destination is a symbolic link | `symlink_metadata` does not follow one, so a link standing in for an installation read as `foreign` and a dangling one read as `foreign` rather than `missing`. `fs::metadata` follows, which is what the agent does |
+| An orphan candidate is a symbolic link | `Path::is_dir` follows one, so the sweep claimed a link the user had put there and removed it. `DirEntry::file_type` does not follow, which is the entry's own type |
+| A file's mode | `fs::write` then `set_permissions` ignores the umask, so under `umask 077` a manifest landed at 0644. The mode belongs to the creation |
+| `x-embedded-digest: ""` | A key that is there and empty read as a claim, so an edited copy read as `modified` rather than `foreign` |
+| `with_tool_name("")` | Stamped `x-embedded-by: ""`, which is foreign to every run including this tool's own. An empty name is passed over |
+
+### The command line
+
+| | |
+| --- | --- |
+| Any argument that is not UTF-8 | `std::env::args` panics, and `intercept` runs before the tool has read its own command line. A file name the tool would have handled took the whole process down. `args_os` throughout, and `intercept_args` takes `AsRef<OsStr>` |
+| `--agent ""` | Parsed to nothing, and an empty list reads as "use the default" everywhere below, so the run silently installed for every agent. Only the front end knows the flag was given |
+| `--dir ""` | Resolved to the working directory, so every skill landed loose in whatever directory the tool was run from |
+
+### Deliberate divergences this review settled
+
+These differ from go-skill-embed on purpose. Each is a place where the Go
+behaviour looked accidental rather than chosen.
+
+| | |
+| --- | --- |
+| A junk file that is not inside any skill | Go never walks it, because it only descends into directories holding a `SKILL.md`. Refusing the whole set over it crashed a user's binary over a file the skills do not contain. The check applies inside a skill alone |
+| A custom agent whose project directory is one component, such as `skills` | Go takes `filepath.Dir("skills")`, which is `"."`, and a marker of `.` always exists, so the search stops at the working directory. Here such an agent contributes no marker and the search walks to the repository root |
+| A skill at the root of the tree with no `name` field | Go names it after whatever string the caller passed as the root, which `include_dir!` cannot supply. It is an error that says so |
+| `safe_join` refuses `a/../b` | Go's `path.Clean` accepts it as `b`. Only a caller writing its own file list can produce one, and a `..` inside an embedded path is never meant |
+| The installed skill directory is 0755 | Go's `os.MkdirTemp` makes it 0700, which its own notes list as an accepted wart. A project checkout that another account cannot read is worse than the wart |
+
+### Visibility
+
+`File::executable` was a public setter for a field nothing on the embedded side
+reads, and its own doc comment said so. It is gone. `INJECTED_KEYS`,
+`manifest::strip` and `paths::clean` are read in one file each and are private.
+`State::as_str` and `Action::as_str` duplicated what `Display` answers and had
+no caller. `Scope::as_str` stays, because the clap adapter needs a
+`&'static str`.
+
+`#[non_exhaustive]` is on `Error` alone. On `InstallTarget`, `InstallStatus` and
+`InstallResult` it forbade construction, and those three are plain data with
+every field public. A front end that wants to hand `render_results` a row it
+built, to test its own output, could not. Nothing outside the crate matches
+them exhaustively, so the attribute protected nobody.
+
 ## Things that look wrong but are not
 
 **`Error::Help` is a variant of the error type.** Help was asked for and
@@ -327,11 +393,6 @@ make a caller choose between them.
 in that file takes one lock first, and no other test binary shares the process.
 It is the only file that touches the environment or the working directory, and
 the workspace lint is `deny` rather than `forbid` so that it can say so.
-
-**`tests/scope.rs` compares against a canonicalized path.** macOS answers
-`current_dir` with `/private/var/...` where the temporary directory was handed
-out as `/var/...`. A root the search resolved and a root a test built have to
-go through the same resolution.
 
 **The workspace depends on `skill-embed` with `default-features = false`.** A
 member that wants `include_dir` asks for it. Without this, the clap adapter
@@ -416,7 +477,6 @@ disk. That one is not on the list below: `projectroot::within` refuses it.
 | A user's own `chmod +x` is reverted | The state is `outdated` either way, and install repairs it without asking |
 | Names differing only by Unicode normalization are not caught | `str::to_lowercase` is not the file system's equivalence relation. It catches the ASCII case, which is the one that happens |
 | `--force` with `--dir` can remove an unrelated directory | It needs a skill whose name collides with something in that directory |
-| `--agent ""` selects nothing | The value is dropped as empty before anything can name it. `Error::NoAgentSelected` at least makes it matchable |
 | `InstallOptions::names` is not deduplicated | Naming a skill twice writes it twice |
 | A BOM moves into the body | Only when `with` creates a frontmatter block that was not there |
 | `quote` and `unquote` are asymmetric | A tool name holding a quote or a backslash never reads back, so the skill stays `foreign` |

@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 /// A `..` is resolved against the path as written, which is what makes it
 /// lexical: a symbolic link in front of one is not followed. [`real`] is the
 /// function that follows links, and the two answer different questions.
-pub(crate) fn clean(path: &Path) -> PathBuf {
+fn clean(path: &Path) -> PathBuf {
     let mut parts: Vec<Component<'_>> = Vec::new();
     for c in path.components() {
         match c {

@@ -69,9 +69,15 @@ impl Installer {
     }
 
     /// Sets the name recorded in installed skills and shown in help.
+    ///
+    /// An empty name is not a name, and is passed over. A skill stamped
+    /// `x-embedded-by: ""` is foreign to every run, including this tool's own.
     #[must_use]
     pub fn with_tool_name(mut self, name: impl Into<String>) -> Self {
-        self.tool_name = name.into();
+        let name = name.into();
+        if !name.is_empty() {
+            self.tool_name = name;
+        }
         self
     }
 
@@ -215,6 +221,19 @@ impl Installer {
         agent::choices(&self.agents)
     }
 
+    /// Writes a report to wherever [`Installer::with_output`] points.
+    ///
+    /// A front end that renders its own output calls it, so that one setting
+    /// reaches every one of them. [`crate::render_results`] and
+    /// [`crate::render_status`] are what it is given.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the writer refused.
+    pub fn write_report(&self, text: &str) -> Result<()> {
+        self.write_out(text).map_err(|e| Error::io("write the report", e))
+    }
+
     pub(crate) fn write_out(&self, s: &str) -> io::Result<()> {
         let mut w = self.out.lock().unwrap_or_else(PoisonError::into_inner);
         w.write_all(s.as_bytes())?;
@@ -273,6 +292,12 @@ impl Installer {
         let scope = options.scope.unwrap_or(self.default_scope);
 
         if let Some(dir) = &options.dir {
+            // An empty name is not a directory. It resolves to the working
+            // directory, which would put every skill loose in whatever
+            // directory the tool was run from.
+            if dir.as_os_str().is_empty() {
+                return Err(Error::Usage("the install directory must be named".to_owned()));
+            }
             // Validated before `dir` wins, so that a bad `--agent` alongside it
             // is a diagnosis rather than silence.
             agent::resolve(&self.agents, &options.agents, &|_| true)?;
@@ -382,7 +407,7 @@ impl Installer {
         for (t, orphans) in targets.iter().zip(orphans_at) {
             for sk in &skills {
                 options.check_cancelled()?;
-                out.push(self.inspect(t, sk));
+                out.push(self.inspect(t, sk)?);
             }
             for st in orphans {
                 // A named run acts on what it was told to. `install demo` is
@@ -450,10 +475,21 @@ impl Installer {
             options.check_cancelled()?;
             let entry =
                 entry.map_err(|e| Error::io(format!("read {}", target.dir.display()), e))?;
-            if !entry.path().is_dir() {
+            // The entry's own type, which does not follow a symbolic link. A
+            // link is something the user put there, and the sweep removes what
+            // it finds, so it must not reach through one.
+            let is_dir = entry
+                .file_type()
+                .map_err(|e| Error::io(format!("read {}", entry.path().display()), e))?
+                .is_dir();
+            if !is_dir {
                 continue;
             }
-            let name = entry.file_name().to_string_lossy().into_owned();
+            // A name that is not UTF-8 is not a skill name, so nothing embedded
+            // can share it and nothing here can claim it.
+            let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+                continue;
+            };
             if self.set.get(&name).is_some() {
                 continue;
             }
@@ -473,7 +509,8 @@ impl Installer {
                 continue; // not a skill directory, or not one that can be read
             };
             let fields = manifest::fields(&installed);
-            let recorded = fields.get(manifest::KEY_EMBEDDED_DIGEST);
+            // A key that is there and empty carries no claim, so it is no claim.
+            let recorded = fields.get(manifest::KEY_EMBEDDED_DIGEST).filter(|d| !d.is_empty());
             if recorded.is_none()
                 || fields.get(manifest::KEY_EMBEDDED_BY).map(String::as_str)
                     != Some(&self.tool_name)
@@ -501,7 +538,7 @@ impl Installer {
         Ok(out)
     }
 
-    fn inspect(&self, target: &InstallTarget, sk: &Skill) -> InstallStatus {
+    fn inspect(&self, target: &InstallTarget, sk: &Skill) -> Result<InstallStatus> {
         let dest = target.dir.join(sk.name());
         let mut st = InstallStatus {
             skill: sk.name().to_owned(),
@@ -513,17 +550,18 @@ impl Installer {
             installed_version: None,
         };
 
-        match dest.symlink_metadata() {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return st,
-            // A directory that cannot even be described is not ours to replace
-            // silently.
-            Err(_) => {
-                st.state = State::Foreign;
-                return st;
-            }
+        // `metadata`, which follows a symbolic link, because a link standing in
+        // for an installed skill is one the agent reads through. A link is
+        // therefore described by what it points at, and a dangling one is
+        // nothing at all.
+        match fs::metadata(&dest) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(st),
+            // Not being able to describe the destination at all is not a state.
+            // It says nothing about what is there, and the run cannot go on.
+            Err(e) => return Err(Error::io(format!("read {}", dest.display()), e)),
             Ok(meta) if !meta.is_dir() => {
                 st.state = State::Foreign;
-                return st;
+                return Ok(st);
             }
             Ok(_) => {}
         }
@@ -531,18 +569,20 @@ impl Installer {
         let Ok(installed) = fs::read(dest.join(SKILL_FILE)) else {
             // A directory with no manifest is not ours to replace silently.
             st.state = State::Foreign;
-            return st;
+            return Ok(st);
         };
         let fields = manifest::fields(&installed);
         st.installed_by = fields.get(manifest::KEY_EMBEDDED_BY).cloned();
         st.installed_version = fields.get(manifest::KEY_EMBEDDED_VERSION).cloned();
-        let Some(recorded) = fields.get(manifest::KEY_EMBEDDED_DIGEST) else {
+        // A key that is there and empty carries no claim, so it is no claim.
+        let Some(recorded) = fields.get(manifest::KEY_EMBEDDED_DIGEST).filter(|d| !d.is_empty())
+        else {
             st.state = State::Foreign;
-            return st;
+            return Ok(st);
         };
         if st.installed_by.as_deref() != Some(&self.tool_name) {
             st.state = State::Foreign;
-            return st;
+            return Ok(st);
         }
 
         // Something there cannot be read or hashed, such as a symlink a user
@@ -551,7 +591,7 @@ impl Installer {
         // instead fail the whole run for every other skill at this target.
         let Ok(found) = Tree::read_dir(&dest) else {
             st.state = State::Foreign;
-            return st;
+            return Ok(st);
         };
 
         st.state = if found.digest() != *recorded {
@@ -567,7 +607,7 @@ impl Installer {
             // repairing it should not need `--force`.
             State::Outdated
         };
-        st
+        Ok(st)
     }
 
     /// Writes the selected skills into the resolved targets.
@@ -653,7 +693,9 @@ impl Installer {
                     Action::Skipped => Ok(()),
                 };
                 if let Err(e) = done {
-                    results.push(result);
+                    // The row says what was done, so it is added once that is
+                    // true. Adding it first made a failed write print
+                    // `installed` above its own error.
                     return (results, Err(e));
                 }
             }
@@ -692,20 +734,22 @@ impl Installer {
                 }
                 _ => (Action::Removed, None),
             };
-            results.push(InstallResult {
-                skill: st.skill.clone(),
-                target: st.target.clone(),
-                path: st.path.clone(),
-                before: st.state,
-                action,
-                reason,
-            });
             if action == Action::Removed
                 && !options.dry_run
                 && let Err(e) = fs::remove_dir_all(&st.path)
             {
+                // The row is added once the removal is true, so a failure never
+                // prints `removed` above its own error.
                 return (results, Err(Error::io(format!("remove {}", st.path.display()), e)));
             }
+            results.push(InstallResult {
+                skill: st.skill,
+                target: st.target,
+                path: st.path,
+                before: st.state,
+                action,
+                reason,
+            });
         }
         (results, Ok(()))
     }
@@ -815,7 +859,6 @@ impl InstallOptions {
 
 /// One destination directory and the agents that read from it.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct InstallTarget {
     /// The absolute skills directory.
     pub dir: PathBuf,
@@ -842,7 +885,6 @@ impl InstallTarget {
 
 /// The state of one skill at one destination.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct InstallStatus {
     /// The skill's name. An orphan has one and no embedded skill behind it.
     pub skill: String,
@@ -862,7 +904,6 @@ pub struct InstallStatus {
 
 /// The outcome for one skill at one destination.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct InstallResult {
     /// The skill's name.
     pub skill: String,

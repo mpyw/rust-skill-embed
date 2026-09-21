@@ -22,14 +22,17 @@ fn main() -> ExitCode {
         return code;
     }
 
-    let files: Vec<String> = std::env::args().skip(1).collect();
+    // `args_os`, because a file name is not always UTF-8 and `args` panics on
+    // one. A tool that takes file names has to reach them as the operating
+    // system spells them.
+    let files: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if files.is_empty() {
         // Nothing else mentions the skill command, so this line has to.
         eprintln!("usage: demo-lint [file...]\n\n{}", SKILLS.usage_hint());
         return ExitCode::FAILURE;
     }
     for file in files {
-        println!("{file}: nothing to report");
+        println!("{}: nothing to report", file.display());
     }
     ExitCode::SUCCESS
 }

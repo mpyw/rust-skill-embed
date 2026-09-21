@@ -156,3 +156,32 @@ fn the_help_names_the_tool_and_the_agents() {
     assert!(install.contains("github-copilot|claude-code"), "{install}");
     assert!(install.contains("[default: detected]"), "{install}");
 }
+
+/// `with_output` reaches this front end too, so a tool that redirects the
+/// report gets it from both.
+#[test]
+fn the_report_goes_to_the_installers_own_writer() {
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("the buffer").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let tmp = tempfile::tempdir().expect("a temporary directory");
+    let dir = tmp.path().join("skills").display().to_string();
+    let out = Captured::default();
+    let skills = skills().with_output(out.clone());
+
+    skill_embed_clap::run(&skills, &matches(&skills, &["skill", "install", "--dir", &dir]))
+        .expect("the install");
+
+    let text = String::from_utf8(out.0.lock().expect("the buffer").clone()).expect("UTF-8");
+    assert!(text.starts_with("installed  demo-skill"), "{text}");
+}

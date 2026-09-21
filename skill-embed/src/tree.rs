@@ -64,7 +64,16 @@ impl Tree {
     /// behind and putting the rest in walk order.
     pub(crate) fn from_files(files: impl IntoIterator<Item = File>) -> Self {
         let mut files: Vec<File> = files.into_iter().filter(|f| !is_junk(&f.path)).collect();
-        files.sort_by(|a, b| walk_order(&a.path).cmp(&walk_order(&b.path)));
+        // Component by component, which is the order a directory walk reaches
+        // the files in. Comparing the paths as strings is not that order: a
+        // directory `b` is reached before a file `b.md`, because a directory
+        // listing sorts `b` first and the walk descends at once, while `.`
+        // sorts before `/`.
+        //
+        // The digest covers the files in this order, and go-skill-embed hashes
+        // the same skill through its own directory walk. A skill holding both
+        // `b.md` and `b/` hashed differently in the two until this was fixed.
+        files.sort_by(|a, b| a.path.split('/').cmp(b.path.split('/')));
         Self { files }
     }
 
@@ -168,7 +177,7 @@ impl Tree {
                 )
             })?
             .to_owned();
-        fs::create_dir_all(parent)?;
+        create_dir(parent)?;
 
         let staging =
             tempfile::Builder::new().prefix(&format!(".{leaf}.tmp-")).tempdir_in(parent)?;
@@ -177,10 +186,9 @@ impl Tree {
             let rewritten = transform.and_then(|t| t(&f.path, &f.data));
             let data: &[u8] = rewritten.as_deref().unwrap_or(&f.data);
             if let Some(dir) = target.parent() {
-                fs::create_dir_all(dir)?;
+                create_dir(dir)?;
             }
-            fs::write(&target, data)?;
-            set_executable(&target, executable(&f.path, data))?;
+            write_file(&target, data, executable(&f.path, data))?;
         }
 
         // A name to move the old directory to, next to it so the rename stays
@@ -223,18 +231,38 @@ impl Tree {
     }
 }
 
+/// Writes a new file with the mode it should carry.
+///
+/// The mode goes to the creation rather than to a `set_permissions` afterwards,
+/// so the process umask applies to it. Setting it afterwards widened the file
+/// past what the user asked for: under `umask 077` the manifest landed at 0644
+/// where the Go original leaves it at 0600.
 #[cfg(unix)]
-fn set_executable(path: &Path, on: bool) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    fs::set_permissions(path, fs::Permissions::from_mode(if on { 0o755 } else { 0o644 }))
+fn write_file(path: &Path, data: &[u8], executable: bool) -> io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mode = if executable { 0o755 } else { 0o644 };
+    fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(path)?.write_all(data)
 }
 
-// The signature is the one the Unix version needs, so the caller has one call
-// to make. Nothing here can fail.
+/// A platform with no mode to carry. The file is new either way, because the
+/// whole tree is staged in a directory nothing else has written to.
 #[cfg(not(unix))]
-#[expect(clippy::unnecessary_wraps, reason = "it matches the Unix version's signature")]
-fn set_executable(_path: &Path, _on: bool) -> io::Result<()> {
-    Ok(())
+fn write_file(path: &Path, data: &[u8], _executable: bool) -> io::Result<()> {
+    fs::write(path, data)
+}
+
+/// Creates a directory and its parents, with the umask applied to 0755.
+#[cfg(unix)]
+fn create_dir(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    fs::DirBuilder::new().recursive(true).mode(0o755).create(path)
+}
+
+#[cfg(not(unix))]
+fn create_dir(path: &Path) -> io::Result<()> {
+    fs::create_dir_all(path)
 }
 
 #[cfg(unix)]
@@ -286,20 +314,6 @@ fn collect(dir: &Path, prefix: &str, out: &mut Vec<File>) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// The key that puts paths in the order a directory walk reaches them.
-///
-/// Sorting the paths as strings is not that order. A directory `b` is reached
-/// before a file `b.md`, because `ReadDir` sorts `b` before `b.md` and the walk
-/// descends at once. Comparing the strings puts `b.md` first, since `.` sorts
-/// before `/`.
-///
-/// The digest covers the files in this order, and go-skill-embed hashes the
-/// same skill through its own directory walk. A skill holding both `b.md` and
-/// `b/` hashed differently in the two until this existed.
-fn walk_order(path: &str) -> Vec<&str> {
-    path.split('/').collect()
 }
 
 /// Rejects a path that would escape `root`.

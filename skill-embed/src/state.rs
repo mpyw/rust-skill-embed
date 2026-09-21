@@ -1,5 +1,7 @@
 /// What is already present at a destination.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::Display, strum::IntoStaticStr)]
+///
+/// The name it prints comes from the variant, through [`std::fmt::Display`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::Display)]
 #[strum(serialize_all = "kebab-case")]
 pub enum State {
     /// Nothing is installed there yet.
@@ -21,12 +23,6 @@ pub enum State {
 }
 
 impl State {
-    /// The name this state prints under.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-
     /// Reports whether overwriting this state would destroy work that this tool
     /// did not create.
     #[must_use]

@@ -17,8 +17,9 @@
 //!
 //! The flags are the ones `gh skill install` defines, so a user who knows that
 //! command already knows this one. What each subcommand prints comes from
-//! [`skill_embed::render_results`] and [`skill_embed::render_status`], so every
-//! front end reports the same way.
+//! [`skill_embed::render_results`] and [`skill_embed::render_status`], and goes
+//! to the writer [`skill_embed::Installer::with_output`] names, so every front
+//! end reports the same way to the same place.
 //!
 //! [clap]: https://docs.rs/clap
 
@@ -153,8 +154,7 @@ pub fn run(skills: &Installer, matches: &ArgMatches) -> Result<()> {
     match name {
         "list" => {
             let statuses = skills.status(&options)?;
-            print!("{}", skill_embed::render_status(&statuses));
-            Ok(())
+            skills.write_report(&skill_embed::render_status(&statuses))
         }
         "install" | "uninstall" => {
             let (results, outcome) = if name == "install" {
@@ -162,7 +162,10 @@ pub fn run(skills: &Installer, matches: &ArgMatches) -> Result<()> {
             } else {
                 skills.uninstall(&options)
             };
-            print!("{}", skill_embed::render_results(&results, options.dry_run));
+            // Reported first. The results describe everything that happened
+            // before the error, and a run that wrote three skills and refused a
+            // fourth has to say so.
+            skills.write_report(&skill_embed::render_results(&results, options.dry_run))?;
             outcome
         }
         _ => Err(Error::Usage(format!("unknown {} subcommand {name:?}", skills.command_name()))),

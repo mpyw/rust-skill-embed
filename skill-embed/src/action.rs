@@ -1,5 +1,7 @@
 /// What install or uninstall did at one destination.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::Display, strum::IntoStaticStr)]
+///
+/// The name it prints comes from the variant, through [`std::fmt::Display`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum Action {
     /// The skill was written where nothing was.
@@ -12,12 +14,4 @@ pub enum Action {
     ///
     /// [`InstallResult::reason`]: crate::InstallResult::reason
     Skipped,
-}
-
-impl Action {
-    /// The name this action prints under.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
 }
