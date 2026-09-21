@@ -46,6 +46,23 @@ run_test "fmt" \
 run_test "clippy" \
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+# A `cfg` block is always compiled on the platform a contributor is on, so a
+# lint that fires only elsewhere ships. An unused import behind `cfg(unix)` went
+# out this way and came back from the Windows job. One other target catches it
+# first. Skipped when that target is not installed, since CI covers all three.
+run_test "cross-clippy" \
+    bash -c '
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) target=x86_64-unknown-linux-gnu ;;
+        *)                    target=x86_64-pc-windows-msvc ;;
+      esac
+      if ! rustup target list --installed | grep -qx "$target"; then
+        echo "skipped: run \"rustup target add $target\" to check it here"
+        exit 0
+      fi
+      cargo clippy --workspace --all-targets --all-features --target "$target" -- -D warnings
+    '
+
 # A broken intra-doc link is not a build failure, so it needs asking for.
 run_test "doc" \
     env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features

@@ -9,7 +9,7 @@ mod common;
 use std::fs;
 
 use common::{TempDir, captured, installer, into_dir, skills, testdata};
-use skill_embed::{Action, Error, InstallOptions, Installer, SKILL_FILE, State};
+use skill_embed::{Error, InstallOptions, Installer, SKILL_FILE, State};
 
 /// `std::env::args` panics on an argument that is not UTF-8, and `intercept`
 /// runs before the tool has looked at its own command line. A file name the
@@ -86,7 +86,7 @@ fn the_sweep_does_not_reach_through_a_symlink() {
     let (results, outcome) = next.install(&into_dir(&dest));
     outcome.expect("the install");
     assert!(
-        !results.iter().any(|r| r.action == Action::Removed),
+        !results.iter().any(|r| r.action == skill_embed::Action::Removed),
         "the sweep claimed a symlink: {results:?}"
     );
     assert!(dest.join("gone-skill").symlink_metadata().is_ok(), "the symlink was removed");

@@ -410,6 +410,14 @@ block in `README.md` is compiled. A hand written example drifts when a
 signature changes, and nothing else would say so. `doctests/skills` exists
 because the quick start calls `include_dir!`, which needs a directory to read.
 
+**`test_all.sh` lints against another target.** A `cfg` block is always
+compiled on the platform a contributor is on, so a lint that fires only
+elsewhere passes locally and fails in CI. An unused import behind `cfg(unix)`
+went out that way. Measured: `cargo clippy` on macOS is clean over it, and
+`cargo clippy --target x86_64-pc-windows-msvc` names it. The step skips when
+that target is not installed, because the three-platform matrix covers it
+either way.
+
 **Help text is asserted with `expect-test`.** A flag or a default changing
 moves several blocks at once. Editing them by hand invites a typo that reads as
 a real difference. `UPDATE_EXPECT=1 cargo test` rewrites them.
