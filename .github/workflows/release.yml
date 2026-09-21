@@ -4,28 +4,49 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-
 jobs:
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
+
+    # A GitHub environment, so the repository settings can hold a required
+    # reviewer or a branch rule in front of a publish. The trusted publisher
+    # configuration on crates.io names this same environment.
+    environment: release
+
+    # Naming any permission replaces the whole default set, so both are here.
+    permissions:
+      # The OIDC token this exchanges for a crates.io one.
+      id-token: write
+      # `gh release create`.
+      contents: write
+
     steps:
       - uses: actions/checkout@v7
 
       - name: Run the checks
         run: ./test_all.sh
 
-      # The adapter depends on the core, so the core has to be on crates.io
-      # before the adapter can resolve it. The examples and the doctest crate
-      # carry publish = false and are skipped.
+      # No token in this repository's secrets. The action asks GitHub for a
+      # token that says which workflow is running, hands it to crates.io, and
+      # gets one back that lasts thirty minutes. Its post step revokes it.
+      #
+      # crates.io has to be told to trust this: the crate's Settings, Trusted
+      # Publishing, with the repository owner, the repository name,
+      # `release.yml` and `release`. That can only be set up after the crate
+      # exists, so the first version of each goes up from a laptop.
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      # One command for the workspace. It publishes in dependency order and
+      # waits for each crate to reach the index, which two `cargo publish -p`
+      # calls in a row do not. The examples and the doctest crate carry
+      # `publish = false` and are passed over.
       - name: Publish
-        run: |
-          cargo publish -p skill-embed
-          cargo publish -p skill-embed-clap
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --workspace
 
       - name: Create the release
         run: gh release create "$GITHUB_REF_NAME" --generate-notes

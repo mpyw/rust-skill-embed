@@ -455,6 +455,33 @@ the result. Install it into a repository that is about to embed skills.
 gh skill install mpyw/rust-skill-embed skill-embed-adoption --agent claude-code
 ```
 
+## Releasing
+
+The first version of each crate goes up from a laptop, because a trusted
+publisher can only be configured for a crate that already exists.
+
+```bash
+cargo login              # a token, once, on this machine
+cargo publish --workspace
+```
+
+Then, in each crate's Settings on crates.io, under Trusted Publishing:
+
+| Field | Value |
+| --- | --- |
+| Repository owner | `mpyw` |
+| Repository name | `rust-skill-embed` |
+| Workflow filename | `release.yml` |
+| Environment | `release` |
+
+After that, pushing a `v*` tag publishes both crates and cuts the release. No
+token is stored in this repository. The workflow asks GitHub for one that says
+which workflow is running, hands it to crates.io, and gets back one that lasts
+thirty minutes.
+
+Turning on "require Trusted Publishing" in the same settings then refuses a
+publish from a token at all.
+
 ## Development
 
 ```bash
