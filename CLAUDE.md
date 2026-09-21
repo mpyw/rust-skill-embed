@@ -337,6 +337,13 @@ go through the same resolution.
 member that wants `include_dir` asks for it. Without this, the clap adapter
 would pull in a proc macro it never uses.
 
+**The README's examples carry their whole setup.** rustdoc hides a doctest line
+that starts with `# `, and the source's own doc comments use that. `README.md`
+must not: GitHub and crates.io render it as written, so a hidden line shows up
+as a literal `#`, which is not Rust comment syntax at all. Each block there is
+a function a reader could paste, and the parameter is where the installer comes
+from.
+
 **`doctests` is a crate with no code in it.** It exists so that every Rust
 block in `README.md` is compiled. A hand written example drifts when a
 signature changes, and nothing else would say so. `doctests/skills` exists

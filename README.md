@@ -210,10 +210,12 @@ example-adoption  up-to-date  /private/tmp/readme-demo/repo/.claude/skills/examp
 `usage_hint` is that line. It tracks the command name and the skill count, so
 it cannot drift from what the command actually does.
 
-```rust,no_run
-# use std::sync::LazyLock;
-# static SKILLS: LazyLock<skill_embed::Installer> = LazyLock::new(|| unimplemented!());
-eprintln!("usage: mytool [file...]\n\n{}", SKILLS.usage_hint());
+```rust
+use skill_embed::Installer;
+
+fn usage(skills: &Installer) {
+    eprintln!("usage: mytool [file...]\n\n{}", skills.usage_hint());
+}
 ```
 
 ```text
@@ -283,13 +285,16 @@ A skipped skill does not stop the others. `install` writes everything it can.
 It returns one `InstallResult` per skill either way. The outcome beside them is
 `Error::NeedsForce` when it left anything alone.
 
-```rust,no_run
-# let skills: skill_embed::Installer = unimplemented!();
-# let options = skill_embed::InstallOptions::default();
-let (results, outcome) = skills.install(&options);
-print!("{}", skill_embed::render_results(&results, options.dry_run));
-if let Err(skill_embed::Error::NeedsForce(blocked)) = outcome {
-    eprintln!("{blocked}");
+```rust
+use skill_embed::{Error, InstallOptions, Installer, Result, render_results};
+
+fn install(skills: &Installer, options: &InstallOptions) -> Result<()> {
+    let (results, outcome) = skills.install(options);
+    print!("{}", render_results(&results, options.dry_run));
+    if let Err(Error::NeedsForce(blocked)) = &outcome {
+        eprintln!("{blocked}");
+    }
+    outcome
 }
 ```
 
@@ -334,19 +339,20 @@ never exits the process, so a driver keeps control.
 
 ### clap
 
-```rust,no_run
+```rust
 use clap::Command;
-# use std::sync::LazyLock;
-# static SKILLS: LazyLock<skill_embed::Installer> = LazyLock::new(|| unimplemented!());
+use skill_embed::{Installer, Result};
 
-let cli = Command::new("mytool").subcommand(skill_embed_clap::command(&SKILLS));
-let matches = cli.get_matches();
-if let Some((name, args)) = matches.subcommand()
-    && name == SKILLS.command_name()
-{
-    skill_embed_clap::run(&SKILLS, args)?;
+fn run(skills: &Installer) -> Result<()> {
+    let cli = Command::new("mytool").subcommand(skill_embed_clap::command(skills));
+    let matches = cli.get_matches();
+    if let Some((name, args)) = matches.subcommand()
+        && name == skills.command_name()
+    {
+        skill_embed_clap::run(skills, args)?;
+    }
+    Ok(())
 }
-# Ok::<_, skill_embed::Error>(())
 ```
 
 `skill_embed_clap::options` reads the flags without running anything. A tool
@@ -381,15 +387,18 @@ Every option is a method on `Installer`, and each one returns the installer.
 `Installer::status` reports without changing anything. `install` and
 `uninstall` return one `InstallResult` per skill per destination.
 
-```rust,no_run
-use skill_embed::{Agent, AgentSelector, InstallOptions, Scope};
-# let skills: skill_embed::Installer = unimplemented!();
+```rust
+use skill_embed::{Agent, AgentSelector, InstallOptions, Installer, Result, Scope, render_results};
 
-let (results, outcome) = skills.install(&InstallOptions {
-    agents: vec![AgentSelector::from(&Agent::CLAUDE_CODE)],
-    scope: Some(Scope::User),
-    ..InstallOptions::default()
-});
+fn install_for_claude_code(skills: &Installer) -> Result<()> {
+    let (results, outcome) = skills.install(&InstallOptions {
+        agents: vec![AgentSelector::from(&Agent::CLAUDE_CODE)],
+        scope: Some(Scope::User),
+        ..InstallOptions::default()
+    });
+    print!("{}", render_results(&results, false));
+    outcome
+}
 ```
 
 `render_results` and `render_status` turn those values into the text the
