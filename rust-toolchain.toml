@@ -1,0 +1,4 @@
+# Pins the toolchain so a local checkout and CI build the same thing.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]

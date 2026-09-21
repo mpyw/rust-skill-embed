@@ -1,0 +1,18 @@
+[package]
+name = "readme-doctests"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Nothing imports this crate. Its only job is to compile every Rust block in
+# README.md as a doctest, so an example cannot drift from a signature.
+[dependencies]
+skill-embed = { workspace = true, features = ["include_dir"] }
+skill-embed-clap.workspace = true
+clap.workspace = true
+include_dir.workspace = true
+
+[lints]
+workspace = true

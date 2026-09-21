@@ -1,0 +1,32 @@
+[package]
+name = "skill-embed"
+version = "0.1.0"
+description = "Ship agent skills inside a Rust binary, and give that binary a `skill install` command"
+keywords = ["agent", "skills", "embed", "cli", "claude"]
+categories = ["command-line-interface", "development-tools"]
+readme = "../README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = ["include_dir"]
+# Reads an embedded skill tree from `include_dir::include_dir!`.
+include_dir = ["dep:include_dir"]
+
+[dependencies]
+jiff.workspace = true
+sha2.workspace = true
+strum.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+include_dir = { workspace = true, optional = true }
+
+[dev-dependencies]
+expect-test = "1"
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "demo-lint"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+skill-embed = { workspace = true, features = ["include_dir"] }
+include_dir.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

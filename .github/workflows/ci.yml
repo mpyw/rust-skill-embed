@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push: {}
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The paths, the executable bit and the rename swap all behave
+        # differently off Linux, and the tests reach every one of them.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      # The toolchain comes from rust-toolchain.toml, so CI and a contributor's
+      # machine run the same rustc, clippy and rustfmt.
+      - uses: Swatinem/rust-cache@v2
+
+      # Tests, the feature the core has to build without, formatting, clippy
+      # and the documents. test_all.sh is the whole of it, so a contributor
+      # running one command sees what CI sees.
+      - name: Run the checks
+        shell: bash
+        run: ./test_all.sh
+
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+
+      # rust-version in Cargo.toml is a promise. Nothing checks it unless the
+      # build is run with that compiler.
+      - name: Build with the declared minimum
+        run: |
+          msrv=$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["rust_version"])')
+          rustup toolchain install "$msrv" --profile minimal
+          cargo +"$msrv" check --workspace --all-features

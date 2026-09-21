@@ -1,0 +1,4 @@
+# The width the source is written to. The default 100 leaves a flag help line
+# and a long error message wrapped in places that read worse than the line does.
+max_width = 100
+use_small_heuristics = "Max"

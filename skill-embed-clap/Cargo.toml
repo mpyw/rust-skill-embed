@@ -1,0 +1,23 @@
+[package]
+name = "skill-embed-clap"
+version = "0.1.0"
+description = "A clap command for the agent skills embedded by skill-embed"
+keywords = ["agent", "skills", "embed", "clap", "cli"]
+categories = ["command-line-interface"]
+readme = "../README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+skill-embed.workspace = true
+clap = { workspace = true, features = ["std", "help", "usage", "error-context", "string"] }
+
+[dev-dependencies]
+skill-embed = { workspace = true, features = ["include_dir"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true
