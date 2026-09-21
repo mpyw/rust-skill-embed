@@ -205,9 +205,17 @@ fn claude_config_dir_is_honoured() {
     let env = Env::new();
     env.home(&tmp.mkdir("home"));
     let first = tmp.mkdir("first");
+    // The separator is `;` on Windows and `:` elsewhere. A Windows path holds a
+    // `:` of its own, so a value joined with `:` there names one root and not
+    // two.
+    let separator = if cfg!(windows) { ';' } else { ':' };
     Env::set(
         "CLAUDE_CONFIG_DIR",
-        Some(&PathBuf::from(format!("{}:{}", first.display(), tmp.join("second").display()))),
+        Some(&PathBuf::from(format!(
+            "{}{separator}{}",
+            first.display(),
+            tmp.join("second").display()
+        ))),
     );
 
     let dir = Agent::CLAUDE_CODE.dir(Scope::User, None).expect("the user directory");
