@@ -1,17 +1,39 @@
 name: Release
 
+# Show the target version in the run title, e.g. "Release v1.2.3".
+run-name: "Release ${{ inputs.version }}"
+
+# Dispatched, not triggered by the tag or by the release.
+#
+# crates.io is where the canonical artifact lands, and a published version can
+# never be published again. A GitHub Release freezes its tag, so creating one
+# before the publish succeeded would burn the version number on a run that
+# failed half way. The order here is publish, then release.
+#
+# crates.io matches the `workflow_ref` claim, which names the top level
+# workflow rather than the reusable one it called. Both entry points therefore
+# need a trusted publisher configuration: `tag_and_release.yml` for the usual
+# path, and `release.yml` for a retry dispatched on its own.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., v1.2.3) - tag must already exist"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to release (e.g., v1.2.3) - tag must already exist"
+        required: true
+        type: string
 
 jobs:
-  publish:
-    name: Publish to crates.io
+  release:
     runs-on: ubuntu-latest
 
-    # A GitHub environment, so the repository settings can hold a required
-    # reviewer or a branch rule in front of a publish. The trusted publisher
-    # configuration on crates.io names this same environment.
+    # The repository settings can put a reviewer in front of a publish, and the
+    # trusted publisher configuration names the same environment.
     environment: release
 
     # Naming any permission replaces the whole default set, so both are here.
@@ -22,33 +44,109 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid version format '$VERSION'"
+            echo "Expected format: vX.Y.Z (e.g., v1.2.3)"
+            exit 1
+          fi
+          echo "Version format valid: $VERSION"
+
+      - name: Check tag exists
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! git ls-remote --tags "https://github.com/${{ github.repository }}" \
+            | grep -q "refs/tags/${VERSION}$"; then
+            echo "Error: Tag '$VERSION' does not exist"
+            echo "Please create the tag first using the 'Tag' workflow"
+            exit 1
+          fi
+          echo "Tag exists: $VERSION"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version }}
 
       - name: Run the checks
         run: ./test_all.sh
 
-      # No token in this repository's secrets. The action asks GitHub for a
-      # token that says which workflow is running, hands it to crates.io, and
-      # gets one back that lasts thirty minutes. Its post step revokes it.
-      #
-      # crates.io has to be told to trust this: the crate's Settings, Trusted
-      # Publishing, with the repository owner, the repository name,
-      # `release.yml` and `release`. That can only be set up after the crate
-      # exists, so the first version of each goes up from a laptop.
+      # A version already on crates.io cannot be published again, and a run
+      # that stopped between the two crates has to be finishable. Each one is
+      # asked about, and the ones already there are excluded.
+      - name: Work out what is left to publish
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          want="${VERSION#v}"
+          exclude=""
+          left=""
+          for crate in skill-embed skill-embed-clap; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: rust-skill-embed release workflow' \
+              "https://crates.io/api/v1/crates/$crate/$want")
+            if [[ "$code" == "200" ]]; then
+              echo "$crate $want is already on crates.io"
+              exclude="$exclude --exclude $crate"
+            else
+              echo "$crate $want is not published yet (HTTP $code)"
+              left="$left $crate"
+            fi
+          done
+          echo "left=$left" >> "$GITHUB_OUTPUT"
+          echo "exclude=$exclude" >> "$GITHUB_OUTPUT"
+
+      # No token in this repository's secrets. The action asks GitHub for one
+      # that says which workflow is running, hands it to crates.io, and gets
+      # back one that lasts thirty minutes. Its post step revokes it.
       - name: Authenticate with crates.io
+        if: steps.plan.outputs.left != ''
         id: auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       # One command for the workspace. It publishes in dependency order and
       # waits for each crate to reach the index, which two `cargo publish -p`
-      # calls in a row do not. The examples and the doctest crate carry
+      # calls in a row do not, and `skill-embed-clap` cannot build until
+      # `skill-embed` is there. The examples and the doctest crate carry
       # `publish = false` and are passed over.
-      - name: Publish
+      - name: Publish to crates.io
+        if: steps.plan.outputs.left != ''
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --workspace
+          EXCLUDE: ${{ steps.plan.outputs.exclude }}
+        run: cargo publish --workspace $EXCLUDE
 
+      - name: Nothing left to publish
+        if: steps.plan.outputs.left == ''
+        run: echo "Every crate is already on crates.io at this version"
+
+      # Last, because it freezes the tag. Everything that can still fail has
+      # happened by now. A release that is already there belongs to the run
+      # that got this far before, and is left alone.
       - name: Create the release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release '$VERSION' already exists"
+            exit 0
+          fi
+          {
+            echo "| Crate | Install |"
+            echo "| --- | --- |"
+            echo "| \`skill-embed\` | \`cargo add skill-embed\` |"
+            echo "| \`skill-embed-clap\` | \`cargo add skill-embed-clap\` |"
+          } > notes.md
+          gh release create "$VERSION" \
+            --repo "$REPO" \
+            --verify-tag \
+            --title "$VERSION" \
+            --notes-file notes.md \
+            --generate-notes

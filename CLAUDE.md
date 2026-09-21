@@ -430,6 +430,42 @@ every field public. A front end that wants to hand `render_results` a row it
 built, to test its own output, could not. Nothing outside the crate matches
 them exhaustively, so the attribute protected nobody.
 
+## Releasing
+
+**Triggering the publish on a tag push, or on a release being created.** A
+GitHub release freezes its tag, and a crates.io version can never be published
+again. Either trigger creates the frozen thing before the act that can still
+fail, so a run that died half way burns the version number. The order is
+publish, then release, and `workflow_dispatch` is what starts it. The reasoning
+is [this article](https://zenn.dev/yumemi_inc/articles/github-release-not-a-publish-trigger),
+which sorts packages by where the canonical artifact lives. crates.io is
+registry first.
+
+**One trusted publisher configuration.** crates.io reads the `workflow_ref`
+claim, which GitHub documents as the current workflow. For a reusable workflow
+that is the caller, not the callee, so `release.yml` called from
+`tag_and_release.yml` arrives at crates.io as `tag_and_release.yml`. A retry
+dispatched on `release.yml` arrives as itself. Both are legitimate, and
+crates.io allows several configurations per crate, so both are registered.
+`job_workflow_ref` would have named the reusable workflow, and crates.io does
+not read it.
+
+**Putting the publish in a workflow of its own.** It would need a third
+configuration, or a `workflow_call`-only file that no one can dispatch. Neither
+buys anything: the publish is what a release is, and splitting it from the
+release leaves two things to keep in step.
+
+**`cargo publish -p skill-embed` then `cargo publish -p skill-embed-clap`.**
+The adapter cannot build until the core is in the index, and two commands in a
+row do not wait for it. `cargo publish --workspace` publishes in dependency
+order and waits.
+
+**Letting a second run fail on what the first one did.** A release is dispatched
+again when it dies half way, so each step asks before it acts. The tag is left
+alone when it is already on this commit and refused when it is on another. Each
+crate is asked about on crates.io and excluded when it is there. The release is
+left alone when it exists.
+
 ## Things that look wrong but are not
 
 **`Error::Help` is a variant of the error type.** Help was asked for and

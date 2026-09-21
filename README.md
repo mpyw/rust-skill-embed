@@ -457,6 +457,27 @@ gh skill install mpyw/rust-skill-embed skill-embed-adoption --agent claude-code
 
 ## Releasing
 
+Dispatch **Tag and Release** with a version, such as `v0.1.0`. It tags, then
+publishes to crates.io, then cuts the GitHub release.
+
+That order matters. A published version can never be published again, and a
+GitHub release freezes its tag. Creating the release first would burn the
+version number on a run that failed half way, so it is the last thing that
+happens.
+
+Every step is safe to run again with the same version.
+
+| | On a second run |
+| --- | --- |
+| Tag | Left alone when it is already on this commit, refused when it is on another |
+| Publish | Each crate is asked about, and the ones already on crates.io are excluded |
+| Release | Left alone when it is already there |
+
+So a run that failed part way is finished by dispatching **Release** on its
+own with the same version.
+
+### The first release, and the crates.io settings
+
 The first version of each crate goes up from a laptop, because a trusted
 publisher can only be configured for a crate that already exists.
 
@@ -465,22 +486,25 @@ cargo login              # a token, once, on this machine
 cargo publish --workspace
 ```
 
-Then, in each crate's Settings on crates.io, under Trusted Publishing:
+Then, in each crate's Settings on crates.io, under Trusted Publishing, add
+**two** configurations:
 
-| Field | Value |
-| --- | --- |
-| Repository owner | `mpyw` |
-| Repository name | `rust-skill-embed` |
-| Workflow filename | `release.yml` |
-| Environment | `release` |
+| Field | Usual path | Retry path |
+| --- | --- | --- |
+| Repository owner | `mpyw` | `mpyw` |
+| Repository name | `rust-skill-embed` | `rust-skill-embed` |
+| Workflow filename | `tag_and_release.yml` | `release.yml` |
+| Environment | `release` | `release` |
 
-After that, pushing a `v*` tag publishes both crates and cuts the release. No
-token is stored in this repository. The workflow asks GitHub for one that says
-which workflow is running, hands it to crates.io, and gets back one that lasts
-thirty minutes.
+Two, because crates.io matches the `workflow_ref` claim. That claim names the
+top level workflow rather than the reusable one it called, so the usual path
+arrives as `tag_and_release.yml` and a retry dispatched on its own arrives as
+`release.yml`.
 
-Turning on "require Trusted Publishing" in the same settings then refuses a
-publish from a token at all.
+No token is stored in this repository. The workflow asks GitHub for one that
+says which workflow is running, hands it to crates.io, and gets back one that
+lasts thirty minutes. Turning on "require Trusted Publishing" in the same
+settings then refuses a publish from a token at all.
 
 ## Development
 

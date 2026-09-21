@@ -1,0 +1,87 @@
+name: Tag
+
+# Show the target version in the run title, e.g. "Tag v1.2.3".
+run-name: "Tag ${{ inputs.version }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag (e.g., v1.2.3)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to tag (e.g., v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid version format '$VERSION'"
+            echo "Expected format: vX.Y.Z (e.g., v1.2.3)"
+            exit 1
+          fi
+          echo "Version format valid: $VERSION"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Nothing else would catch a version that says one thing here and another
+      # in the manifests, and `cargo publish` reads the manifests. The adapter
+      # asks for the core by version too, so a release where the two disagree
+      # ships an adapter pointing at a core that is not this one.
+      - name: Check the manifests say this version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          want="${VERSION#v}"
+          wrong=""
+          for manifest in skill-embed/Cargo.toml skill-embed-clap/Cargo.toml; do
+            have=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$manifest" | head -1)
+            [[ "$have" == "$want" ]] || wrong="$wrong $manifest($have)"
+          done
+          dep=$(sed -n 's/.*skill-embed = { version = "\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          [[ "$dep" == "$want" ]] || wrong="$wrong Cargo.toml:workspace.dependencies($dep)"
+          if [[ -n "$wrong" ]]; then
+            echo "Error: these do not say $want:$wrong"
+            exit 1
+          fi
+          echo "Every manifest says $want"
+
+      # A retry of one version has to be able to reach this twice. A tag that
+      # is already on the commit being tagged is the state this step is for, so
+      # it is left alone. One pointing somewhere else is a different release
+      # wearing this name, and is refused.
+      - name: Create and push the tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          here=$(git rev-parse HEAD)
+          there=$(git ls-remote --tags origin "refs/tags/$VERSION" | cut -f1)
+          if [[ -n "$there" ]]; then
+            if [[ "$there" == "$here" ]]; then
+              echo "Tag '$VERSION' is already on $here"
+              exit 0
+            fi
+            echo "Error: tag '$VERSION' is on $there, and this run is on $here"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          echo "Tag '$VERSION' created and pushed successfully"
