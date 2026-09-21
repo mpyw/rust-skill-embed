@@ -460,6 +460,13 @@ The adapter cannot build until the core is in the index, and two commands in a
 row do not wait for it. `cargo publish --workspace` publishes in dependency
 order and waits.
 
+**Skipping the crates.io authentication when there is nothing to publish.**
+The exchange is what proves the trusted publisher configuration still names
+this workflow and this environment. A release with nothing left to publish
+would skip it and leave that unanswered until the next one, which is the run
+that cannot afford to find out. It costs one token that the action revokes
+when the job ends, and publishes nothing by itself.
+
 **Letting a second run fail on what the first one did.** A release is dispatched
 again when it dies half way, so each step asks before it acts. The tag is left
 alone when it is already on this commit and refused when it is on another. Each
