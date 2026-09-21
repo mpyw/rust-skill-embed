@@ -6,6 +6,10 @@
 
 use std::process::{Command, Output};
 
+/// The variable `std::env::home_dir` reads. Unix reads `HOME` and Windows reads
+/// `USERPROFILE`, so a test that sets one of them sets nothing on the other.
+const HOME_VAR: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+
 fn demo_lint(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_demo-lint"))
         .args(args)
@@ -86,7 +90,7 @@ fn a_project_run_names_the_root_it_resolved_to() {
         .args(["skill", "install", "--agent", "claude-code"])
         // Run from a subdirectory: the search has to walk up to the root.
         .current_dir(repo.join("sub"))
-        .env("HOME", tmp.path().join("home"))
+        .env(HOME_VAR, tmp.path().join("home"))
         .output()
         .expect("the example binary runs");
 
@@ -106,7 +110,7 @@ fn a_project_run_from_the_home_directory_is_refused() {
     let out = Command::new(env!("CARGO_BIN_EXE_demo-lint"))
         .args(["skill", "install"])
         .current_dir(&home)
-        .env("HOME", &home)
+        .env(HOME_VAR, &home)
         .output()
         .expect("the example binary runs");
 
@@ -124,7 +128,7 @@ fn user_scope_writes_under_the_home_directory() {
 
     let out = Command::new(env!("CARGO_BIN_EXE_demo-lint"))
         .args(["skill", "install", "--scope", "user", "--agent", "claude-code"])
-        .env("HOME", &home)
+        .env(HOME_VAR, &home)
         .env_remove("CLAUDE_CONFIG_DIR")
         .output()
         .expect("the example binary runs");

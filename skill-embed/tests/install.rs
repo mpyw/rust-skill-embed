@@ -166,39 +166,35 @@ fn a_skill_without_frontmatter_installs_clean() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_lost_executable_bit_is_repaired_without_force() {
-    #[cfg(not(unix))]
-    return;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::fs::PermissionsExt as _;
 
-        let tmp = TempDir::new("exec");
-        let dest = tmp.join("skills");
-        let skills = installer(testdata());
-        let options = InstallOptions { names: vec!["demo-skill".to_owned()], ..into_dir(&dest) };
-        skills.install(&options).1.expect("the install");
+    let tmp = TempDir::new("exec");
+    let dest = tmp.join("skills");
+    let skills = installer(testdata());
+    let options = InstallOptions { names: vec!["demo-skill".to_owned()], ..into_dir(&dest) };
+    skills.install(&options).1.expect("the install");
 
-        let script = dest.join("demo-skill/scripts/run.sh");
-        assert!(
-            fs::metadata(&script).expect("the script").permissions().mode() & 0o111 != 0,
-            "the shebang script was installed without the executable bit"
-        );
+    let script = dest.join("demo-skill/scripts/run.sh");
+    assert!(
+        fs::metadata(&script).expect("the script").permissions().mode() & 0o111 != 0,
+        "the shebang script was installed without the executable bit"
+    );
 
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).expect("the chmod");
-        let statuses = skills.status(&options).expect("status");
-        assert_eq!(
-            statuses[0].state,
-            State::Outdated,
-            "a lost executable bit reads as edited, so repairing it would need --force"
-        );
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).expect("the chmod");
+    let statuses = skills.status(&options).expect("status");
+    assert_eq!(
+        statuses[0].state,
+        State::Outdated,
+        "a lost executable bit reads as edited, so repairing it would need --force"
+    );
 
-        let (results, outcome) = skills.install(&options);
-        outcome.expect("the repair");
-        assert_eq!(results[0].action, Action::Updated);
-        assert!(fs::metadata(&script).expect("the script").permissions().mode() & 0o111 != 0);
-    }
+    let (results, outcome) = skills.install(&options);
+    outcome.expect("the repair");
+    assert_eq!(results[0].action, Action::Updated);
+    assert!(fs::metadata(&script).expect("the script").permissions().mode() & 0o111 != 0);
 }
 
 #[test]
@@ -215,30 +211,26 @@ fn metadata_off_makes_everything_foreign() {
     assert_eq!(statuses[0].state, State::Foreign);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_executable_rule_decides_the_mode() {
-    #[cfg(not(unix))]
-    return;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::fs::PermissionsExt as _;
 
-        let tmp = TempDir::new("exec-rule");
-        let dest = tmp.join("skills");
-        let set = SkillSet::from_files(skill_files(
-            "demo-skill",
-            &[("scripts/run", "no shebang here\n"), ("notes.md", "plain\n")],
-        ))
-        .expect("the fixture");
-        let skills = installer(set).with_executable(|name, _| name.starts_with("scripts/"));
-        skills.install(&into_dir(&dest)).1.expect("the install");
+    let tmp = TempDir::new("exec-rule");
+    let dest = tmp.join("skills");
+    let set = SkillSet::from_files(skill_files(
+        "demo-skill",
+        &[("scripts/run", "no shebang here\n"), ("notes.md", "plain\n")],
+    ))
+    .expect("the fixture");
+    let skills = installer(set).with_executable(|name, _| name.starts_with("scripts/"));
+    skills.install(&into_dir(&dest)).1.expect("the install");
 
-        let mode = |rel: &str| {
-            fs::metadata(dest.join("demo-skill").join(rel)).expect(rel).permissions().mode() & 0o111
-        };
-        assert_ne!(mode("scripts/run"), 0, "the rule's file is not executable");
-        assert_eq!(mode("notes.md"), 0, "a file the rule passed over is executable");
-    }
+    let mode = |rel: &str| {
+        fs::metadata(dest.join("demo-skill").join(rel)).expect(rel).permissions().mode() & 0o111
+    };
+    assert_ne!(mode("scripts/run"), 0, "the rule's file is not executable");
+    assert_eq!(mode("notes.md"), 0, "a file the rule passed over is executable");
 }
 
 #[test]

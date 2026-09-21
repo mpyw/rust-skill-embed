@@ -229,7 +229,10 @@ fn set_executable(path: &Path, on: bool) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(if on { 0o755 } else { 0o644 }))
 }
 
+// The signature is the one the Unix version needs, so the caller has one call
+// to make. Nothing here can fail.
 #[cfg(not(unix))]
+#[expect(clippy::unnecessary_wraps, reason = "it matches the Unix version's signature")]
 fn set_executable(_path: &Path, _on: bool) -> io::Result<()> {
     Ok(())
 }

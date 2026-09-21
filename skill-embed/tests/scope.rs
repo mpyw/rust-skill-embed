@@ -17,6 +17,10 @@ use skill_embed::{Agent, AgentSelector, Error, InstallOptions, Scope};
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// The variable `std::env::home_dir` reads. Unix reads `HOME` and Windows reads
+/// `USERPROFILE`, so a test that sets one of them sets nothing on the other.
+const HOME_VAR: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+
 /// Holds the process-wide state for one test and puts it back afterwards.
 struct Env {
     _guard: MutexGuard<'static, ()>,
@@ -29,7 +33,7 @@ impl Env {
     fn new() -> Self {
         Self {
             _guard: LOCK.lock().unwrap_or_else(PoisonError::into_inner),
-            home: std::env::var("HOME").ok(),
+            home: std::env::var(HOME_VAR).ok(),
             config: std::env::var("CLAUDE_CONFIG_DIR").ok(),
             cwd: std::env::current_dir().expect("a working directory"),
         }
@@ -46,29 +50,32 @@ impl Env {
     }
 
     fn home(&self, dir: &Path) -> &Self {
-        Self::set("HOME", Some(dir));
+        Self::set(HOME_VAR, Some(dir));
         self
     }
 
-    fn cd(&self, dir: &Path) -> &Self {
+    /// Moves to `dir` and answers with the working directory as the operating
+    /// system gives it back.
+    ///
+    /// That is the path the project root search starts from, and it is not
+    /// always the one the test passed in: macOS answers `/private/var/...`
+    /// where the temporary directory was handed out as `/var/...`. Building
+    /// the expected paths from the answer keeps the comparison honest without
+    /// a test having to know which platform it is on.
+    #[expect(
+        clippy::unused_self,
+        reason = "taking the guard is how a caller shows it holds the lock"
+    )]
+    fn cd(&self, dir: &Path) -> PathBuf {
         std::env::set_current_dir(dir).expect("the working directory");
-        self
+        std::env::current_dir().expect("a working directory")
     }
-}
-
-/// The path as the operating system gives it back.
-///
-/// macOS answers `current_dir` with `/private/var/...` where the temporary
-/// directory was handed out as `/var/...`, so a root the search resolved and a
-/// root a test built have to be compared after the same resolution.
-fn real(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|e| panic!("canonicalize {}: {e}", p.display()))
 }
 
 impl Drop for Env {
     fn drop(&mut self) {
         for (key, value) in
-            [("HOME", self.home.clone()), ("CLAUDE_CONFIG_DIR", self.config.clone())]
+            [(HOME_VAR, self.home.clone()), ("CLAUDE_CONFIG_DIR", self.config.clone())]
         {
             // SAFETY: as above, and this is the last use of the lock.
             unsafe {
@@ -91,15 +98,14 @@ fn the_search_prefers_a_directory_that_already_holds_an_agent_directory() {
     let tmp = TempDir::new("root-marker");
     let env = Env::new();
     env.home(&tmp.mkdir("home"));
-    let repo = tmp.mkdir("repo");
     tmp.mkdir("repo/.git");
     tmp.mkdir("repo/sub/.claude");
-    env.cd(&tmp.mkdir("repo/sub/deeper"));
+    let deeper = env.cd(&tmp.mkdir("repo/sub/deeper"));
+    let sub = deeper.parent().expect("repo/sub");
 
     let skills = installer(skills(&["demo-skill"]));
     let targets = skills.targets(&claude_only()).expect("the targets");
-    let sub = real(&repo.join("sub"));
-    assert_eq!(targets[0].root.as_deref(), Some(sub.as_path()));
+    assert_eq!(targets[0].root.as_deref(), Some(sub));
     assert_eq!(targets[0].dir, sub.join(".claude/skills"));
 }
 
@@ -110,13 +116,13 @@ fn the_search_stops_at_the_repository_root() {
     env.home(&tmp.mkdir("home"));
     // A marker above the repository, which the walk must not reach.
     tmp.mkdir(".claude");
-    let repo = tmp.mkdir("repo");
     tmp.mkdir("repo/.git");
-    env.cd(&tmp.mkdir("repo/sub"));
+    let sub = env.cd(&tmp.mkdir("repo/sub"));
+    let repo = sub.parent().expect("the repository root");
 
     let skills = installer(skills(&["demo-skill"]));
     let targets = skills.targets(&claude_only()).expect("the targets");
-    assert_eq!(targets[0].root.as_deref(), Some(real(&repo).as_path()));
+    assert_eq!(targets[0].root.as_deref(), Some(repo));
 }
 
 /// The user scope directories live there. A project installation written into
