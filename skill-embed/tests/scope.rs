@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use common::{TempDir, installer, skills};
-use skill_embed::{Agent, AgentSelector, Error, InstallOptions, Scope};
+use skill_embed::{Action, Agent, AgentSelector, Error, InstallOptions, Scope, State};
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -284,6 +284,77 @@ fn a_link_that_stays_inside_the_project_is_followed() {
 
     let skills = installer(skills(&["demo-skill"])).with_project_root(&root);
     skills.targets(&claude_only()).expect("a link inside the project was refused");
+}
+
+/// One directory reached by two agent paths, which is what a repository does
+/// when it links `.claude/skills` at `.agents/skills` so that every agent reads
+/// one tree. `targets` merges destinations by path, so the two spellings are
+/// two of them, and each skill is written twice.
+///
+/// The behaviour is pinned rather than merged. Both writes carry the same
+/// bytes, so the second is a rewrite and nothing is lost, and the run after it
+/// reads up to date at both. Merging by identity would print one destination,
+/// under whichever spelling the agent order reached first. That is
+/// `.agents/skills`, so the path the reader linked would appear nowhere.
+#[test]
+fn one_directory_reached_by_two_agent_paths() {
+    if !common::symlinks_available() {
+        return;
+    }
+    let tmp = TempDir::new("shared-dir");
+    let env = Env::new();
+    env.home(&tmp.mkdir("home"));
+    let root = tmp.mkdir("repo");
+    let shared = tmp.mkdir("repo/.agents/skills");
+    tmp.mkdir("repo/.claude");
+    let link = root.join(".claude/skills");
+    common::link_dir(&shared, &link).expect("the link");
+
+    let skills = installer(skills(&["demo-skill"])).with_project_root(&root);
+    let options = InstallOptions {
+        agents: vec![AgentSelector::All],
+        scope: Some(Scope::Project),
+        ..Default::default()
+    };
+
+    let targets = skills.targets(&options).expect("the targets");
+    let dirs: Vec<&Path> = targets.iter().map(|t| t.dir.as_path()).collect();
+    assert_eq!(dirs, [shared.as_path(), link.as_path()], "one directory, two destinations");
+
+    let (results, outcome) = skills.install(&options);
+    outcome.expect("the install");
+    assert_eq!(results.len(), 2, "one row per destination: {results:?}");
+    for (r, dir) in results.iter().zip([&shared, &link]) {
+        assert_eq!(r.action, Action::Installed);
+        assert_eq!(r.path, dir.join("demo-skill"));
+    }
+
+    // Both rows are the same directory, and it holds one skill rather than two.
+    let real = |p: &Path| std::fs::canonicalize(p).expect("the real path");
+    assert_eq!(real(&results[0].path), real(&results[1].path));
+    let mut entries: Vec<_> = std::fs::read_dir(&shared)
+        .expect("the shared directory")
+        .map(|e| e.expect("an entry").file_name())
+        .collect();
+    entries.sort();
+    assert_eq!(entries, ["demo-skill"], "the shared directory holds more than the one skill");
+    assert!(
+        shared.join("demo-skill/SKILL.md").is_file(),
+        "the second write did not leave a readable skill"
+    );
+
+    // The rewrite is a rewrite: the run after it has nothing to do at either
+    // spelling, so the doubled row never becomes a doubled change.
+    let (results, outcome) = skills.install(&options);
+    outcome.expect("the second install");
+    for r in &results {
+        assert_eq!(
+            (r.before, r.action),
+            (State::UpToDate, Action::Skipped),
+            "{}",
+            r.path.display()
+        );
+    }
 }
 
 /// It could be read as the embedding tool's own choice, the way `--dir` is. It
